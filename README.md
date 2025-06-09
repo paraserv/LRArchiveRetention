@@ -77,15 +77,15 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 
 ## Logging
 
-The script generates detailed logs with the following format:
+The script generates detailed logs in the following format:
 ```
-2025-01-01 12:00:00.123 [INFO] - Starting archive retention process
-2025-01-01 12:00:01.234 [DEBUG] - Processing file: D:\LogRhythmArchives\archive1.lca
-2025-01-01 12:00:02.345 [WARNING] - File is newer than retention period, skipping
-2025-01-01 12:00:03.456 [ERROR] - Error processing file: Access denied
+2025-06-01 12:00:00.123 [INFO] - Starting archive retention process
+2025-06-01 12:00:01.234 [DEBUG] - Processing file: D:\LogRhythmArchives\archive1.lca
+2025-06-01 12:00:02.345 [WARNING] - File is newer than retention period, skipping
+2025-06-01 12:00:03.456 [ERROR] - Error processing file: Access denied
 ```
 
-Log files are automatically created with timestamps in the filename and include detailed information about all operations.
+By default, logs are written to `ArchiveRetention.log` in the same directory as the script. You can specify a custom log path using the `-LogPath` parameter.
 
 ## Best Practices
 
