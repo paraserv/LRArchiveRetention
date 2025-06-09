@@ -1,63 +1,53 @@
-# Archive Retention Manager
+# LogRhythm Archive Retention Manager (v2)
 
-A high-performance PowerShell script for managing file retention policies in archive directories. This script helps automate the cleanup of old files while providing detailed logging and reporting.
+A high-performance PowerShell script for managing LogRhythm archive retention policies. This script helps automate the cleanup of old archive files while providing detailed logging and reporting.
 
 ## Features
 
-- **Flexible Retention Policies**: Define retention periods in days (1-3650)
 - **Safe Execution**: Dry-run mode by default, requires `-Execute` flag for actual deletions
-- **High Performance**: Multi-threaded processing with configurable concurrency
-- **Network Optimized**: Handles UNC paths efficiently with connection pooling
-- **Smart Caching**: Caches directory scans for faster subsequent runs
-- **Detailed Logging**: Comprehensive logging with rotation and compression
-- **File Type Filtering**: Include/exclude specific file types
-- **Progress Tracking**: Real-time progress with ETA and processing rates
+- **High Performance**: Efficient processing of large numbers of archive files
+- **Detailed Logging**: Comprehensive logging with timestamps and operation details
+- **Progress Tracking**: Real-time progress updates during execution
+- **Error Handling**: Robust error handling and recovery mechanisms
+- **Flexible Configuration**: Customize retention periods and archive locations
+- **Verbose Output**: Detailed console output with `-Verbose` flag
 
 ## Requirements
 
-- Windows PowerShell 5.1 or later
-- .NET Framework 4.7.2 or later
-- Appropriate permissions on target directories
+- Windows Server with LogRhythm Archive Manager
+- PowerShell 5.1 or later
+- Appropriate permissions on LogRhythm archive directories
+- Sufficient disk space for log files
 
 ## Installation
 
-1. Clone this repository:
-   ```powershell
-   git clone https://your-repository-url/ArchiveRetention.git
-   cd ArchiveRetention
-   ```
-
-2. (Optional) Add the script to your system PATH or use it directly from the repository.
+1. Copy the `ArchiveRetention.ps1` script to your LogRhythm server
+2. Place it in a secure directory (e.g., `C:\LogRhythm\Scripts\ArchiveV2\`)
+3. Ensure the script has read/write permissions to the archive directories
 
 ## Usage
 
 ### Basic Usage
 
 ```powershell
-# Show help
+# Show help and available parameters
 .\ArchiveRetention.ps1 -Help
 
 # Dry run (shows what would be deleted)
-.\ArchiveRetention.ps1 -ArchivePath "C:\Archive" -RetentionDays 90
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives" -RetentionDays 120 -Verbose
 
 # Actual execution (deletes files)
-.\ArchiveRetention.ps1 -ArchivePath "C:\Archive" -RetentionDays 90 -Execute
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives" -RetentionDays 120 -Execute -Verbose
 ```
 
 ### Advanced Examples
 
 ```powershell
-# Process network share with custom concurrency
-.\ArchiveRetention.ps1 -ArchivePath "\\server\share\archive" -RetentionDays 180 -MaxConcurrency 4 -Execute
+# Process a specific archive directory
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 90 -Execute -Verbose
 
-# Process specific file types only
-.\ArchiveRetention.ps1 -ArchivePath "D:\Logs" -RetentionDays 30 -IncludeFileTypes @('.log','.txt') -Execute
-
-# Exclude certain file types
-.\ArchiveRetention.ps1 -ArchivePath "E:\Backups" -RetentionDays 365 -ExcludeFileTypes @('.bak','.tmp') -Execute
-
-# Custom log location and verbosity
-.\ArchiveRetention.ps1 -ArchivePath "C:\Temp" -RetentionDays 7 -LogPath "C:\Logs\archive_cleanup.log" -Verbose -Execute
+# Process with custom log location
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives" -RetentionDays 60 -LogPath "C:\Logs\archive_retention.log" -Execute
 ```
 
 ### Scheduled Task Example
@@ -65,64 +55,73 @@ A high-performance PowerShell script for managing file retention policies in arc
 Create a scheduled task to run the script weekly:
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\ArchiveRetention.ps1" -ArchivePath "C:\Archive" -RetentionDays 90 -Execute -LogPath "C:\Logs\archive_cleanup.log"'
+$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\LogRhythm\Scripts\ArchiveV2\ArchiveRetention.ps1" -ArchivePath "D:\LogRhythmArchives" -RetentionDays 120 -Execute -Verbose'
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
-Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "Weekly Archive Cleanup" -Description "Runs weekly archive cleanup"
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RunOnlyIfNetworkAvailable
+Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -TaskName "LogRhythm Archive Retention" -Description "Runs LogRhythm archive retention weekly" -User "SYSTEM" -RunLevel Highest
 ```
+
+> **Note**: Run the scheduled task as SYSTEM or a service account with appropriate permissions.
 
 ## Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `-ArchivePath` | Path to archive directory (required) | |
-| `-RetentionDays` | Number of days to retain files (1-3650) (required) | |
-| `-Execute` | Perform actual file deletions (without this, runs in dry-run mode) | $false |
-| `-LogPath` | Path to log file | `./ArchiveRetention.log` |
-| `-MaxConcurrency` | Maximum concurrent operations (1-32) | 8 |
-| `-IncludeFileTypes` | Process only these file extensions | `@('.lca')` |
-| `-ExcludeFileTypes` | Exclude these file extensions | `@()` |
-| `-MaxRetries` | Maximum retry attempts for failed operations | 3 |
-| `-RetryDelaySeconds` | Delay between retry attempts | 5 |
-| `-BatchSize` | Number of files to process in each batch | 1000 |
-| `-UseCache` | Enable directory scan caching | $true |
-| `-CacheValidityHours` | Hours before cache is considered stale | 12 |
+| `-ArchivePath` | Path to LogRhythm archive directory (required) | |
+| `-RetentionDays` | Number of days to retain archive files (required) | |
+| `-Execute` | Perform actual file deletions (without this, runs in dry-run mode) | `$false` |
+| `-LogPath` | Path to log file | `./ArchiveRetention_<timestamp>.log` |
+| `-Verbose` | Show detailed output during execution | `$false` |
+
+> **Note**: The script automatically handles LogRhythm archive files (`.lca`). Other file types are ignored by default.
 
 ## Logging
 
 The script generates detailed logs with the following format:
 ```
-[2023-01-01 12:00:00] [INFO] - Message
-[2023-01-01 12:00:01] [WARNING] - Warning message
-[2023-01-01 12:00:02] [ERROR] - Error message
+2025-01-01 12:00:00.123 [INFO] - Starting archive retention process
+2025-01-01 12:00:01.234 [DEBUG] - Processing file: D:\LogRhythmArchives\archive1.lca
+2025-01-01 12:00:02.345 [WARNING] - File is newer than retention period, skipping
+2025-01-01 12:00:03.456 [ERROR] - Error processing file: Access denied
 ```
 
-Logs are automatically rotated when they reach 10MB, keeping up to 5 compressed backups.
-
-## Performance Considerations
-
-- **Memory Usage**: Processes files in batches to control memory consumption
-- **Network**: Optimized for WAN operations with connection pooling
-- **CPU**: Multi-threaded processing with configurable concurrency
-- **Storage**: Caches directory scans to improve performance
+Log files are automatically created with timestamps in the filename and include detailed information about all operations.
 
 ## Best Practices
 
-1. Always test with `-Verbose` and without `-Execute` first
-2. Start with a small retention period and gradually increase
-3. Monitor system resources during initial runs
-4. Schedule during off-peak hours for production systems
-5. Review logs after each run
+1. **Always test first**: Run without `-Execute` to verify which files will be deleted
+2. **Start with higher retention**: Begin with a longer retention period and gradually reduce
+3. **Monitor initial runs**: Check system resources during the first few executions
+4. **Schedule during off-peak**: Run during maintenance windows to minimize impact
+5. **Review logs**: Check the log file after each run for any warnings or errors
+6. **Regular maintenance**: Run the script regularly to prevent archive directory growth
+7. **Backup first**: Ensure you have backups before running with `-Execute`
+
+## Troubleshooting
+
+- **Access Denied**: Ensure the script runs with appropriate permissions
+- **No files processed**: Verify the `-ArchivePath` is correct and contains `.lca` files
+- **Unexpected deletions**: Always test with `-Verbose` first to review actions
+- **Log file issues**: Check disk space and permissions for the log directory
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details
 
-## Contributing
+## Support
 
 Contributions are welcome! Please follow the standard GitHub fork and pull request workflow.
 
 ## Author
 
 Nathan Church  
-Nathan.Church@exabeam.com  
+nathan.church@exabeam.com  
 Exabeam Professional Services
+
+## Version
+
+v2.0 - June 2025  
+- Complete rewrite with improved error handling and logging
+- Fixed empty message parameter binding issues
+- Enhanced logging and progress tracking
+- Optimized for LogRhythm archive management
