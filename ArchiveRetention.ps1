@@ -1,4 +1,4 @@
-﻿ # Script Parameters
+ # Script Parameters
 [CmdletBinding(DefaultParameterSetName='Help')]
 param (
     [Parameter(Mandatory=$true,
@@ -118,8 +118,7 @@ if ($MyInvocation.BoundParameters.Count -eq 0) {
     exit
 }
 
-# Add help documentation
-$ScriptHelp = @"
+<#
 .SYNOPSIS
     Archives or deletes files older than specified retention period.
 
@@ -187,12 +186,10 @@ $ScriptHelp = @"
     Requires PowerShell 5.1 or later
     Author: System Administrator
     Last Modified: 2025-01-22
-"@
-
-# Set the script's help content
-$MyInvocation.MyCommand.ScriptBlock.File | Set-Content -Value $ScriptHelp
+#>
 
 # Add required .NET types for better performance
+if (-not ('FastFileScanner' -as [Type])) {
 Add-Type -TypeDefinition @"
     using System;
     using System.IO;
@@ -303,6 +300,7 @@ Add-Type -TypeDefinition @"
         }
     }
 "@
+}
 
 # Initialize logging
 function Initialize-Logging {
