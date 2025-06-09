@@ -123,6 +123,6 @@ Contributions are welcome! Please follow the standard GitHub fork and pull reque
 
 ## Author
 
-[Your Name]  
-[Your Email]  
-[Your Organization]
+Nathan Church  
+Nathan.Church@exabeam.com  
+Exabeam Professional Services
