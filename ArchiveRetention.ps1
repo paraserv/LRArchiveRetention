@@ -1,12 +1,3 @@
-# TODO: Fix file deletion logic - Currently, files are not being deleted when -Execute flag is used
-# Issue: The script identifies files correctly but doesn't perform the actual deletions
-# Next steps:
-# 1. Locate where file processing and deletion should occur (likely in batch processing section)
-# 2. Verify -Execute flag is properly checked before deletion
-# 3. Add detailed logging around deletion operations
-# 4. Test with small set of files before full run
-# 5. Clean up unused variable 'scriptStartTime' (line 1084) and 'scriptStopTime' (line 1100)
-
 # Script Parameters
 [CmdletBinding(DefaultParameterSetName='Help')]
 param (
@@ -88,11 +79,14 @@ param (
     [switch]$Help
 )
 
+# Script version (single source of truth)
+$SCRIPT_VERSION = '1.0.12'
+
 # Show help if no parameters are provided or -Help is used
 if ($PSCmdlet.ParameterSetName -eq 'Help') {
     $scriptName = $MyInvocation.MyCommand.Name
     Write-Host @"
-Archive Retention Script
+Archive Retention Script v$SCRIPT_VERSION
 -----------------------
 This script processes files older than a specified retention period.
 
@@ -201,9 +195,18 @@ if ($MyInvocation.BoundParameters.Count -eq 0) {
 $ConfirmPreference = 'None'  # Disable confirmation prompts
 $ErrorActionPreference = 'Stop'  # Make errors terminating by default
 
+# Set script start time for accurate timing in summary (local time only)
+$script:startTime = Get-Date
+
+# Set up script log directory
+$scriptLogsDir = Join-Path -Path $PSScriptRoot -ChildPath "script_logs"
+if (-not (Test-Path -Path $scriptLogsDir)) {
+    New-Item -ItemType Directory -Path $scriptLogsDir -Force | Out-Null
+}
+
 # Set up logging
 if ([string]::IsNullOrEmpty($LogPath)) {
-    $script:LogFile = Join-Path -Path $PSScriptRoot -ChildPath "ArchiveRetention.log"
+    $script:LogFile = Join-Path -Path $scriptLogsDir -ChildPath "ArchiveRetention.log"
 } else {
     $script:LogFile = $LogPath
 }
@@ -240,7 +243,12 @@ function Write-Log {
     
     # Handle empty, null, or whitespace-only messages
     if ([string]::IsNullOrWhiteSpace($Message)) {
-        $Message = "[Empty message]"
+        return
+    }
+    
+    # Filter DEBUG/VERBOSE unless -Verbose is set
+    if (($Level -eq 'DEBUG' -or $Level -eq 'VERBOSE') -and $VerbosePreference -ne 'Continue') {
+        return
     }
     
     # Get current timestamp
@@ -273,9 +281,10 @@ function Write-Log {
                     Invoke-LogRotation -LogFile $script:LogFile -MaxLogSizeMB 10 -MaxLogFiles 5
                 }
             }
-            
-            # Append to log file
-            Add-Content -Path $script:LogFile -Value $logMessage -Encoding UTF8 -ErrorAction SilentlyContinue
+            # Append to log file using BOM-less StreamWriter
+            $sw = New-Object System.IO.StreamWriter($script:LogFile, $true, ([System.Text.UTF8Encoding]::new($false)))
+            $sw.WriteLine($logMessage)
+            $sw.Close()
         } catch {
             # If we can't write to the log file, write to console and continue
             Write-Host "WARNING: Failed to write to log file: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -314,7 +323,7 @@ if ($Execute) {
     
     try {
         # Initialize the log file with header information
-        $script:DeletionLogWriter = [System.IO.StreamWriter]::new($script:DeletionLogPath, $false, [System.Text.Encoding]::UTF8)
+        $script:DeletionLogWriter = [System.IO.StreamWriter]::new($script:DeletionLogPath, $false, [System.Text.UTF8Encoding]::new($false))
         $script:DeletionLogWriter.WriteLine("# Retention Action Log - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
         $script:DeletionLogWriter.WriteLine("# Script: $($MyInvocation.MyCommand.Name)")
         $script:DeletionLogWriter.WriteLine("# Archive Path: $ArchivePath")
@@ -376,6 +385,22 @@ function Initialize-Logging {
             Write-Log "Created log directory: $logDir" -Level INFO
         }
         
+        # If log file exists, rename it with a timestamp before creating a new one
+        if (Test-Path -Path $script:LogFile) {
+            $logItem = Get-Item -Path $script:LogFile
+            $timestamp = $logItem.LastWriteTime.ToString('yyyyMMdd_HHmmss')
+            $logName = [System.IO.Path]::GetFileNameWithoutExtension($script:LogFile)
+            $logExt = [System.IO.Path]::GetExtension($script:LogFile)
+            $logDir = Split-Path -Path $script:LogFile -Parent
+            $archivedLog = Join-Path $logDir ("${logName}_$timestamp$logExt")
+            try {
+                Move-Item -Path $script:LogFile -Destination $archivedLog -Force
+                Write-Host "Previous log archived as: $archivedLog" -ForegroundColor Yellow
+            } catch {
+                Write-Host "WARNING: Could not archive previous log: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        
         # Close and clean up any existing writer
         if ($null -ne $script:LogWriter) {
             try {
@@ -395,35 +420,12 @@ function Initialize-Logging {
             }
         }
         
-        # Create or clear the log file
-        try {
-            # Create the log file with initial content
-            @(
-                "=================================================================",
-                                "Script started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
-                "Computer: $env:COMPUTERNAME",
-                "User: $env:USERDOMAIN\$env:USERNAME",
-                "Process ID: $PID",
-                "Command line: $($MyInvocation.Line.Trim())",
-                "Working directory: $PWD",
-                "Script directory: $PSScriptRoot",
-                "Log file: $script:LogFile",
-                "Mode: $(if ($Execute) { 'EXECUTE' } else { 'DRY RUN' })",
-                "Maximum log size: $MaxLogSizeMB MB",
-                "Maximum log files to keep: $MaxLogFiles",
-                "================================================================="
-            ) | Out-File -FilePath $script:LogFile -Encoding UTF8 -Force
-            
-            Write-Host "Logging initialized. Log file: $($script:LogFile)" -ForegroundColor Green
-            
-            # Initialize log entry counter
-            $script:LogEntryCount = 0
-            
-        } catch {
-            $errorMsg = "Failed to initialize log file '$($script:LogFile)': $($_.Exception.Message)"
-            Write-Host "ERROR: $errorMsg" -ForegroundColor Red
-            throw $errorMsg
-        }
+        # Create or clear the log file (empty, BOM-less)
+        $sw = New-Object System.IO.StreamWriter($script:LogFile, $false, ([System.Text.UTF8Encoding]::new($false)))
+        $sw.Close()
+        Write-Host "Logging initialized. Log file: $($script:LogFile)" -ForegroundColor Green
+        # Initialize log entry counter
+        $script:LogEntryCount = 0
     }
     catch {
         $errorMsg = "Logging initialization failed: $($_.Exception.Message)"
@@ -451,20 +453,18 @@ function Close-Logging {
     }
     
     # Close deletion log
-    if ($script:DeletionLogWriter) {
+    if ($script:DeletionLogPath) {
         try {
-            if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+            # Only close if still open
+            if ($script:DeletionLogWriter -and -not $script:DeletionLogWriter.BaseStream.IsClosed) {
                 $script:DeletionLogWriter.Flush()
                 $script:DeletionLogWriter.Close()
             }
-        }
-        catch {
-            Write-Error "Error closing deletion log writer: $($_.Exception.Message)"
-        }
-        finally {
-            $script:DeletionLogWriter.Dispose()
-            $script:DeletionLogWriter = $null
-        }
+            $lines = Get-Content -Path $script:DeletionLogPath
+            if ($lines.Count -le 7) {  # Only header present
+                Add-Content -Path $script:DeletionLogPath -Value "# No files were deleted or processed during this run."
+            }
+        } catch {}
     }
 }
 
@@ -509,10 +509,11 @@ function Invoke-LogRotation {
                 $logName = [System.IO.Path]::GetFileNameWithoutExtension($LogFile)
                 $logExt = [System.IO.Path]::GetExtension($LogFile)
                 
-                # Create rotated log directory if it doesn't exist
-                $rotatedLogsDir = Join-Path -Path $logDir -ChildPath "rotated_logs"
-                if (-not (Test-Path -Path $rotatedLogsDir)) {
-                    New-Item -ItemType Directory -Path $rotatedLogsDir -Force | Out-Null
+                # In Invoke-LogRotation, update rotatedLogsDir for script logs
+                if ($logDir -like '*script_logs') {
+                    $rotatedLogsDir = Join-Path -Path $logDir -ChildPath "rotated_logs"
+                } else {
+                    $rotatedLogsDir = Join-Path -Path $logDir -ChildPath "rotated_logs"
                 }
                 
                 # Generate a unique name for the rotated log
@@ -954,15 +955,14 @@ function Complete-ScriptExecution {
     try {
         # Mark script as completed
         $script:completed = $true
-        $script:endTime = [DateTime]::UtcNow
+        $script:endTime = Get-Date
         
         # Calculate elapsed time
-        if ($null -ne $script:startTime) {
-            $elapsed = $script:endTime - $script:startTime
-            $elapsedTime = $elapsed.ToString('hh\:mm\:ss\.fff')
-        } else {
-            $elapsedTime = "Unknown"
-        }
+        $scriptCompleted = $script:endTime
+        $tz = [System.TimeZoneInfo]::Local
+        Write-Log "Script completed at (local): $($scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')) ($($tz.DisplayName))" -Level INFO
+        $elapsed = $script:endTime - $script:startTime
+        $elapsedTimeStr = '{0:hh\:mm\:ss\.fff}' -f $elapsed
         
         # Stop and dispose the progress timer if it exists
         if ($null -ne $script:progressTimer) {
@@ -984,17 +984,15 @@ function Complete-ScriptExecution {
         if ($Success) {
             Write-Log "=================================================================" -Level INFO
             Write-Log "SCRIPT COMPLETED SUCCESSFULLY" -Level INFO
-            Write-Log "Execution time: $elapsedTime" -Level INFO
+            Write-Log "Execution time: $elapsedTimeStr" -Level INFO
             if (![string]::IsNullOrEmpty($Message)) {
                 Write-Log $Message -Level INFO
             }
-            Write-Log "=================================================================" -Level INFO
         } else {
             Write-Log "=================================================================" -Level ERROR
             Write-Log "SCRIPT FAILED" -Level ERROR
-            Write-Log "Execution time: $elapsedTime" -Level ERROR
+            Write-Log "Execution time: $elapsedTimeStr" -Level ERROR
             Write-Log "Error: $Message" -Level ERROR
-            Write-Log "=================================================================" -Level ERROR
         }
         
         # Close the log writer
@@ -1072,10 +1070,7 @@ try {
             Invoke-LogRotation @script:RetentionLogRotationParams
         }
         
-        Write-Log "=================================================================" -Level INFO
-        Write-Log "Starting Archive Retention Script" -Level INFO
-        Write-Log "Version: 1.0.0" -Level INFO
-        Write-Log "=================================================================" -Level INFO
+        Write-Log "Starting Archive Retention Script (Version $SCRIPT_VERSION)" -Level INFO
     }
     catch {
         Write-Error "Failed to initialize logging: $($_.Exception.Message)"
@@ -1085,67 +1080,47 @@ try {
     $scriptStartTime = Get-Date
     $mode = if ($Execute) { "EXECUTION" } else { "DRY RUN" }
     
+    # Minimum retention safety mechanism
+    $MINIMUM_RETENTION_DAYS = 90
+    if ($RetentionDays -lt $MINIMUM_RETENTION_DAYS) {
+        if ($Execute) {
+            Write-Host "WARNING: The specified retention period ($RetentionDays days) is less than the enforced minimum ($MINIMUM_RETENTION_DAYS days). The minimum will be enforced for deletion." -ForegroundColor Yellow
+            try { Write-Log "WARNING: The specified retention period ($RetentionDays days) is less than the enforced minimum ($MINIMUM_RETENTION_DAYS days). The minimum will be enforced for deletion." -Level WARNING } catch {}
+            $RetentionDays = $MINIMUM_RETENTION_DAYS
+        } else {
+            Write-Host "WARNING: The specified retention period ($RetentionDays days) is less than the enforced minimum ($MINIMUM_RETENTION_DAYS days). This is a dry run, so no files will be deleted, but this value is not allowed for actual deletion." -ForegroundColor Yellow
+            try { Write-Log "WARNING: The specified retention period ($RetentionDays days) is less than the enforced minimum ($MINIMUM_RETENTION_DAYS days). This is a dry run, so no files will be deleted, but this value is not allowed for actual deletion." -Level WARNING } catch {}
+        }
+    }
+    
     # Define cutoff date
     $cutoffDate = (Get-Date).AddDays(-$RetentionDays)
     
     # Log system and environment information
     $timezone = [System.TimeZoneInfo]::Local
-    Write-Log "Script started at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')" -Level INFO
-    Write-Log "Script mode: $mode" -Level INFO
+    $localNow = Get-Date
+    Write-Log "Script started at (local): $($localNow.ToString('yyyy-MM-dd HH:mm:ss.fff')) ($($timezone.DisplayName))" -Level INFO
     Write-Log "PowerShell version: $($PSVersionTable.PSVersion)" -Level DEBUG
     Write-Log "OS: $([System.Environment]::OSVersion)" -Level DEBUG
     Write-Log "Current user: $([System.Environment]::UserDomainName)\$([System.Environment]::UserName)" -Level DEBUG
     Write-Log "Working directory: $(Get-Location)" -Level DEBUG
     Write-Log "Script directory: $PSScriptRoot" -Level DEBUG
-    Write-Log "Log file: $script:LogFile" -Level INFO
-    Write-Log "Script arguments: $($PSBoundParameters | ConvertTo-Json -Compress)" -Level DEBUG
-    Write-Log "Time zone: $($timezone.DisplayName) (UTC$($timezone.BaseUtcOffset.Hours):$($timezone.BaseUtcOffset.Minutes))" -Level INFO
-    Write-Log "Current local time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')" -Level DEBUG
-    Write-Log "Current UTC time: $([DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss.fff'))" -Level DEBUG
-    Write-Log "Cutoff date: $($cutoffDate.ToString('yyyy-MM-dd HH:mm:ss'))" -Level INFO
-    
-    # Validate and normalize the archive path
-    try {
-        Write-Log "Validating archive path: $ArchivePath" -Level INFO
-        $ArchivePath = Get-NormalizedPath -Path $ArchivePath
-        
-        if (-not (Test-Path -Path $ArchivePath -PathType Container)) {
-            throw "The specified path does not exist or is not a directory"
-        }
-        
-        $archiveInfo = Get-Item -LiteralPath $ArchivePath -Force -ErrorAction Stop
-        Write-Log "Archive path validated successfully" -Level INFO
-        Write-Log "Archive location: $($archiveInfo.FullName)" -Level INFO
-        Write-Log "Retention period: $RetentionDays days" -Level INFO
-        
-        # Check if path is a UNC path
-        if ($ArchivePath -match '^\\\\') {
-            Write-Log "Detected UNC path. Verifying network connectivity..." -Level DEBUG
-            if (-not (Test-UNCPath -Path $ArchivePath)) {
-                throw "Cannot access UNC path. Please verify network connectivity and permissions."
-            }
-            Write-Log "UNC path is accessible" -Level DEBUG
-        }
-    }
-    catch {
-        $errorMsg = "Failed to validate archive path '$ArchivePath': $($_.Exception.Message)"
-        Write-Log $errorMsg -Level ERROR
-        throw $errorMsg
-    }
-    
-    # Log script configuration
     Write-Log "Script configuration:" -Level INFO
     Write-Log "  Archive Path: $ArchivePath" -Level INFO
+    if ($Execute -and $script:DeletionLogPath) {
+        Write-Log "  Retention Actions Log: $($script:DeletionLogPath)" -Level INFO
+    }
+    Write-Log "  Script log file: $script:LogFile" -Level INFO
     Write-Log "  Retention Period: $RetentionDays days (cutoff date: $($cutoffDate.ToString('yyyy-MM-dd')))" -Level INFO
     Write-Log "  Include File Types: $($IncludeFileTypes -join ', ')" -Level INFO
-    Write-Log "  Exclude File Types: $($ExcludeFileTypes -join ', ')" -Level INFO
+    Write-Log "  Exclude File Types: $(if ($ExcludeFileTypes.Count -eq 0) { '(none)' } else { $ExcludeFileTypes -join ', ' })" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
-    Write-Log "  Max Concurrency: $MaxConcurrency" -Level DEBUG
-    Write-Log "  Max Retries: $MaxRetries" -Level DEBUG
-    Write-Log "  Retry Delay: ${RetryDelaySeconds}s" -Level DEBUG
-    Write-Log "  Batch Size: $BatchSize" -Level DEBUG
-    Write-Log "  Use Cache: $UseCache" -Level DEBUG
-    Write-Log "  Cache Validity: ${CacheValidityHours}h" -Level DEBUG
+    Write-Log "  Max Concurrency: $MaxConcurrency" -Level INFO
+    Write-Log "  Max Retries: $MaxRetries" -Level INFO
+    Write-Log "  Retry Delay: ${RetryDelaySeconds}s" -Level INFO
+    Write-Log "  Batch Size: $BatchSize" -Level INFO
+    Write-Log "  Use Cache: $UseCache" -Level INFO
+    Write-Log "  Cache Validity: ${CacheValidityHours}h" -Level INFO
     
     # Count files that would be processed
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
@@ -1163,27 +1138,95 @@ try {
         Write-Log "  Oldest file: $($oldestFile.Name) (Last modified: $($oldestFile.LastWriteTime))" -Level INFO
         Write-Log "  Newest file: $($newestFile.Name) (Last modified: $($newestFile.LastWriteTime))" -Level INFO
     }
-    
-    # Initialize counters and timers
-    $script:processedSize = 0
-    $script:processedCount = 0
-    $script:totalSize = 0
-    $script:totalFiles = 0
+
+    # Initialize progress tracking variables
     $script:lastProgressUpdate = Get-Date
     $script:progressUpdateInterval = [TimeSpan]::FromSeconds(30)
-    $script:discoveryStartTime = Get-Date
-    
-    # Set up progress tracking
-    $script:progressActivity = "Processing Archive Retention"
-    $script:progressStatus = "Starting..."
-    $script:progressId = 1
-    $script:progressPercent = 0
-    
-    # Register script completion handler
-    $script:completed = $false
-    $script:startTime = [DateTime]::UtcNow
-    $script:endTime = $null
-    
+    $processedCount = 0
+    $processedSize = 0
+    $errorCount = 0
+    $successCount = 0
+    $currentBatch = @()
+    $batchNumber = 0
+    $processingStartTime = Get-Date
+    foreach ($file in $allFiles) {
+        $currentBatch += $file
+        if ($currentBatch.Count -ge $BatchSize -or $file -eq $allFiles[-1]) {
+            $batchNumber++
+            $batchStartTime = Get-Date
+            Write-Log "Processing batch $batchNumber ($($currentBatch.Count) files)..." -Level DEBUG
+            foreach ($batchFile in $currentBatch) {
+                try {
+                    if ($Execute) {
+                        Invoke-WithRetry -Operation {
+                            Remove-Item -LiteralPath $batchFile.FullName -Force -ErrorAction Stop
+                        } -Description "Delete file: $($batchFile.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
+                        # Log deletion at DEBUG unless -Verbose
+                        Write-Log "Deleted file: $($batchFile.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
+                        if ($script:DeletionLogWriter) {
+                            try {
+                                $script:DeletionLogWriter.WriteLine($batchFile.FullName)
+                                $script:DeletionLogWriter.Flush()
+                            } catch {
+                                Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
+                            }
+                        }
+                    } else {
+                        Write-Log "Would delete: $($batchFile.FullName)" -Level DEBUG
+                    }
+                    $successCount++
+                    $processedSize += $batchFile.Length
+                } catch {
+                    Write-Log "Error processing file $($batchFile.FullName): $($_.Exception.Message)" -Level ERROR
+                    $errorCount++
+                    if ($errorCount -gt 100) {
+                        Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
+                        throw "Excessive errors during processing"
+                    }
+                }
+                $processedCount++
+                $script:processedCount = $processedCount
+                $script:processedSize = $processedSize
+            }
+            $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+            $script:progressPercent = $percentComplete
+            $now = Get-Date
+            if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
+                $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
+                $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
+                Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files)" -Level INFO
+                Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+                Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+                Write-Log "  Rate: $rate" -Level INFO
+                Write-Log "  Estimated time remaining: $eta" -Level INFO
+                $script:lastProgressUpdate = $now
+            }
+            $currentBatch = @()
+            $batchTime = (Get-Date) - $batchStartTime
+            Write-Log "Batch $batchNumber completed in $($batchTime.TotalSeconds.ToString('0.0')) seconds" -Level DEBUG
+        }
+    }
+    $processingTime = $null
+    if ($processingStartTime -is [DateTime]) {
+        try {
+            $processingTime = (Get-Date) - $processingStartTime
+        } catch {
+            Write-Log "Warning: Could not calculate processing time. processingStartTime type: $($processingStartTime.GetType().FullName), value: $processingStartTime" -Level WARNING
+            $processingTime = $null
+        }
+    } else {
+        Write-Log "Warning: processingStartTime is not a DateTime. Type: $($processingStartTime.GetType().FullName), value: $processingStartTime" -Level WARNING
+    }
+    $processingTimeStr = if ($processingTime -is [TimeSpan]) { '{0:hh\:mm\:ss}' -f $processingTime } else { 'Unknown' }
+    Write-Log " " -Level INFO
+    Write-Log "Phase 2 Complete:" -Level INFO
+    Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
+    Write-Log "  Successfully Processed: $successCount" -Level INFO
+    Write-Log "  Failed: $errorCount" -Level INFO
+    Write-Log "  Total Size Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+    Write-Log "  Processing Rate: $(Get-ProcessingRate -StartTime $script:startTime -ProcessedCount $processedCount)" -Level INFO
+    Write-Log "  Elapsed Time: $elapsedTimeStr" -Level INFO
+
     Complete-ScriptExecution -Success $true -Message "Script completed successfully"
 }
 catch {
@@ -1191,6 +1234,12 @@ catch {
     $fullErrorMsg = "Unhandled error: $errorMsg"
     Write-Log $fullErrorMsg -Level FATAL
     Write-Log "Stack trace: $($_.ScriptStackTrace)" -Level DEBUG
+    # Log types and values of key variables if op_Subtraction error
+    if ($errorMsg -like '*op_Subtraction*') {
+        Write-Log "Diagnostic: processingStartTime type: $($processingStartTime?.GetType().FullName), value: $processingStartTime" -Level ERROR
+        Write-Log "Diagnostic: scriptStartTime type: $($scriptStartTime?.GetType().FullName), value: $scriptStartTime" -Level ERROR
+        Write-Log "Diagnostic: script:endTime type: $($script:endTime?.GetType().FullName), value: $script:endTime" -Level ERROR
+    }
     Complete-ScriptExecution -Success $false -Message $errorMsg
     exit 1
 }
