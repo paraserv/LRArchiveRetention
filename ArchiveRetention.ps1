@@ -1,3 +1,58 @@
+<#
+.SYNOPSIS
+    Archive or delete files older than a specified retention period.
+
+.DESCRIPTION
+    This script processes files in a specified directory (including subdirectories) and deletes files that are older than the specified retention period.
+
+    Features:
+    - Batch and robust deletion with retry logic
+    - File type filtering (include/exclude)
+    - Detailed logging and log rotation
+    - Dry-run mode (default)
+    - Progress and error reporting
+    - Minimum retention safety
+
+.PARAMETER ArchivePath
+    Path to archive directory that needs to be processed.
+
+.PARAMETER RetentionDays
+    Number of days to retain files. Files older than this will be processed. (1-3650)
+
+.PARAMETER Execute
+    Actually perform the operations (default: dry-run). Without this, script runs in dry-run mode.
+
+.PARAMETER LogPath
+    Path to log file. Defaults to folder inside script directory.
+
+.PARAMETER MaxRetries
+    Maximum number of retries for failed operations. Default: 3
+
+.PARAMETER RetryDelaySeconds
+    Delay between retry attempts in seconds. Default: 1
+
+.PARAMETER SkipEmptyDirCleanup
+    If specified, skips the empty directory cleanup step after file processing. Default: cleanup is performed.
+
+.PARAMETER IncludeFileTypes
+    File types to include (e.g., '.lca', '.txt'). Defaults to '.lca'.
+
+.EXAMPLE
+    .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
+    (Dry run: shows what would be deleted)
+
+.EXAMPLE
+    .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 365 -Execute
+    (Actually deletes files older than 365 days)
+
+.EXAMPLE
+    .\ArchiveRetention.ps1 -Help
+    (Shows this help)
+
+.NOTES
+    Requires PowerShell 5.1 or later
+#>
+
 # Script Parameters
 [CmdletBinding(DefaultParameterSetName='Help')]
 param (
@@ -34,45 +89,24 @@ param (
         ParameterSetName='Execute',
         HelpMessage="Delay in seconds between retry attempts")]
     [ValidateRange(1,300)]
-    [int]$RetryDelaySeconds = 5,
+    [int]$RetryDelaySeconds = 1,
+    
+    [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="Skip empty directory cleanup after file processing")]
+    [switch]$SkipEmptyDirCleanup,
+    
+    [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="File types to include (default: .lca)")]
+    [string[]]$IncludeFileTypes = @('.lca'),
     
     [Parameter(ParameterSetName='Help')]
     [switch]$Help
 )
 
 # Script version (single source of truth)
-$SCRIPT_VERSION = '1.0.12'
+$SCRIPT_VERSION = '1.0.13'
 
 # Show help if no parameters are provided or -Help is used
-if ($PSCmdlet.ParameterSetName -eq 'Help') {
-    $scriptName = $MyInvocation.MyCommand.Name
-    Write-Host @"
-Archive Retention Script v$SCRIPT_VERSION
------------------------
-This script processes files older than a specified retention period.
-
-USAGE:
-    ./$scriptName -ArchivePath <path> -RetentionDays <days> [options]
-
-REQUIRED PARAMETERS:
-    -ArchivePath     Path to archive directory
-    -RetentionDays   Number of days to retain files (1-3650)
-
-COMMON OPTIONS:
-    -Execute         Actually perform the operations (default: dry-run)
-    -IncludeFileTypes Files to include (default: .lca)
-    -ExcludeFileTypes Files to exclude (default: none)
-    -MaxRetries      Maximum number of retries for failed operations. Default: 3
-    -RetryDelaySeconds Delay between retries in seconds. Default: 5
-
-EXAMPLES:
-    ./$scriptName -ArchivePath "\\server\share" -RetentionDays 90
-    ./$scriptName -ArchivePath "D:\Logs" -RetentionDays 30 -Execute
-    ./$scriptName -Help
-
-For detailed help, use:
-    Get-Help ./$scriptName -Detailed
-"@
+if ($Help -or $MyInvocation.BoundParameters.Count -eq 0) {
+    Get-Help $MyInvocation.MyCommand.Path
     exit
 }
 
@@ -81,58 +115,6 @@ if ($MyInvocation.BoundParameters.Count -eq 0) {
     Get-Help $MyInvocation.MyCommand.Path -Detailed
     exit
 }
-
-<#
-.SYNOPSIS
-    Archives or deletes files older than specified retention period.
-
-.DESCRIPTION
-    This script processes files in a specified directory (including subdirectories) and either
-    deletes or archives files that are older than the specified retention period.
-    
-    The script includes features like:
-    - Parallel processing for better performance
-    - Caching of directory scans
-    - File type filtering
-    - Detailed logging
-    - Dry-run mode
-    - Retry mechanism for network operations
-
-.PARAMETER ArchivePath
-    The root path to process files from. Can be a local path or UNC path.
-
-.PARAMETER RetentionDays
-    Number of days to retain files. Files older than this will be processed.
-
-.PARAMETER Execute
-    Switch to enable actual file operations. Without this, script runs in dry-run mode.
-
-.PARAMETER LogFile
-    Path to the log file. Defaults to script directory.
-
-.PARAMETER MaxRetries
-    Maximum number of retries for failed operations. Default: 3
-
-.PARAMETER RetryDelaySeconds
-    Delay between retries in seconds. Default: 5
-
-.EXAMPLE
-    .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
-    Performs a dry run on network share, processing files older than 90 days
-
-.EXAMPLE
-    .\ArchiveRetention.ps1 -ArchivePath "D:\Logs" -RetentionDays 30 -Execute
-    Actually deletes files older than 30 days in D:\Logs
-
-.EXAMPLE
-    .\ArchiveRetention.ps1 -ArchivePath "E:\Data" -RetentionDays 180 -IncludeFileTypes @('.txt','.csv')
-    Dry run processing only .txt and .csv files older than 180 days
-
-.NOTES
-    Requires PowerShell 5.1 or later
-    Author: System Administrator
-    Last Modified: 2025-01-22
-#>
 
 # Set script preferences
 $ConfirmPreference = 'None'  # Disable confirmation prompts
@@ -155,7 +137,7 @@ if ([string]::IsNullOrEmpty($LogPath)) {
 }
 
 $script:MaxLogSizeMB = 10
-$script:MaxLogFiles = 5
+$script:MaxLogFiles = 10
 
 # Ensure log directory exists
 $logDir = Split-Path -Path $script:LogFile -Parent
@@ -217,12 +199,9 @@ function Write-Log {
     if (-not [string]::IsNullOrEmpty($script:LogFile)) {
         try {
             # Check if log rotation is needed (every 100 log entries to reduce overhead)
-            if ($script:LogEntryCount -ne -1) {
-                $script:LogEntryCount++
-                if ($script:LogEntryCount -ge 100) {
-                    $script:LogEntryCount = 0
-                    Invoke-LogRotation -LogFile $script:LogFile -MaxLogSizeMB 10 -MaxLogFiles 5
-                }
+            if ($script:LogEntryCount -ge 100) {
+                $script:LogEntryCount = 0
+                Invoke-LogRotation -LogFile $script:LogFile -MaxLogSizeMB 10 -MaxLogFiles 10
             }
             # Append to log file using BOM-less StreamWriter
             $sw = New-Object System.IO.StreamWriter($script:LogFile, $true, ([System.Text.UTF8Encoding]::new($false)))
@@ -317,7 +296,7 @@ function Initialize-Logging {
     [CmdletBinding()]
     param(
         [int]$MaxLogSizeMB = 10,
-        [int]$MaxLogFiles = 5
+        [int]$MaxLogFiles = 10
     )
     
     try {
@@ -430,7 +409,7 @@ function Invoke-LogRotation {
         [Parameter(Mandatory=$true)]
         [string]$LogFile,
         [int]$MaxLogSizeMB = 10,
-        [int]$MaxLogFiles = 5,
+        [int]$MaxLogFiles = 10,
         [switch]$IsRetentionLog
     )
     
@@ -870,11 +849,11 @@ function Get-FilesRecursively {
             Write-Log "Sample of files to be processed:" -Level INFO
             $oldFiles | Select-Object -First 10 | ForEach-Object {
                 $age = [math]::Round(($currentTime - $_.LastWriteTime).TotalDays, 2)
-                Write-Log ("  {0} | {1} | {2} days old | {3:N2} MB" -f 
+                Write-Log ("  {0} | {1} | {2} days old | {3:N2} GB" -f 
                     $_.Name,
                     $_.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'),
                     $age,
-                    ($_.Length/1MB)) -Level INFO
+                    ($_.Length/1GB)) -Level INFO
             }
             if ($oldFiles.Count -gt 10) {
                 Write-Log "  ... and $($oldFiles.Count - 10) more files..." -Level INFO
@@ -1005,14 +984,14 @@ try {
     # Initialize logging with timestamp and rotation
     try {
         # Set max log size to 10MB and keep 5 rotated logs
-        Initialize-Logging -MaxLogSizeMB 10 -MaxLogFiles 5
+        Initialize-Logging -MaxLogSizeMB 10 -MaxLogFiles 10
         
         # Set up log rotation for retention logs if in execute mode
         if ($Execute -and $script:DeletionLogPath) {
             $script:RetentionLogRotationParams = @{
                 LogFile = $script:DeletionLogPath
                 MaxLogSizeMB = 50
-                MaxLogFiles = 7
+                MaxLogFiles = 10
                 IsRetentionLog = $true
             }
             
@@ -1080,16 +1059,21 @@ try {
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
     try {
         $allFiles = Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction Stop
+        if ($IncludeFileTypes -and $IncludeFileTypes.Count -gt 0) {
+            $allFiles = $allFiles | Where-Object { $IncludeFileTypes -contains ([System.IO.Path]::GetExtension($_.Name).ToLower()) }
+        }
+        # Only include files older than the cutoff date
+        $allFiles = $allFiles | Where-Object { $_.LastWriteTime -lt $cutoffDate }
     } catch {
-        Write-Log "Error enumerating files in path: $ArchivePath" -Level WARNING
-        Write-Log "Exception: $($_.Exception.Message)" -Level WARNING
-        Write-Log "StackTrace: $($_.ScriptStackTrace)" -Level WARNING
-        $allFiles = @()
+        $errMsg = "CRITICAL: Unable to enumerate files in path: $ArchivePath. Error: $($_.Exception.Message)"
+        Write-Log $errMsg -Level FATAL
+        Write-Host $errMsg -ForegroundColor Red
+        exit 2
     }
     $allFiles = $allFiles | Where-Object { $_ -ne $null }
     
-    $totalSizeMB = [math]::Round(($allFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
-    Write-Log "Found $($allFiles.Count) files ($totalSizeMB MB) that would be processed (older than $RetentionDays days)" -Level INFO
+    $totalSizeGB = [math]::Round(($allFiles | Measure-Object -Property Length -Sum).Sum / 1GB, 2)
+    Write-Log "Found $($allFiles.Count) files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
     
     if ($allFiles.Count -gt 0) {
         $oldestFile = $allFiles | Sort-Object LastWriteTime | Select-Object -First 1
@@ -1145,7 +1129,8 @@ try {
             $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
             $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
             Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) at $elapsedSeconds seconds run-time" -Level INFO
-            Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+            $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+            Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
             Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
             Write-Log "  Rate: $rate" -Level INFO
             Write-Log "  Estimated time remaining: $eta" -Level INFO
@@ -1169,49 +1154,56 @@ try {
     Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
     Write-Log "  Successfully Processed: $successCount" -Level INFO
     Write-Log "  Failed: $errorCount" -Level INFO
-    Write-Log "  Total Size Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+    Write-Log "  Total Size Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
     Write-Log "  Processing Rate: $(Get-ProcessingRate -StartTime $script:startTime -ProcessedCount $processedCount)" -Level INFO
     Write-Log "  Elapsed Time: $elapsedTimeStr" -Level INFO
 
     # After the main loop, always log a final progress update at 100% with total elapsed time
     $finalElapsedSeconds = [math]::Round(((Get-Date) - $processingStartTime).TotalSeconds, 1)
     Write-Log "Progress: 100% ($processedCount of $($allFiles.Count) files) at $finalElapsedSeconds seconds run-time" -Level INFO
-    Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+    Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
     Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
     Write-Log "  Rate: $(Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount)" -Level INFO
     Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
 
     # --- Empty Directory Cleanup ---
-    try {
-        $emptyDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory | Sort-Object FullName -Descending
-        $removedCount = 0
-        foreach ($dir in $emptyDirs) {
-            # Never remove the root archive path itself
-            if ($dir.FullName -eq (Resolve-Path $ArchivePath)) { continue }
-            $children = Get-ChildItem -Path $dir.FullName -Force
-            if ($children.Count -eq 0) {
-                if ($Execute) {
-                    try {
-                        Remove-Item -Path $dir.FullName -Force -ErrorAction Stop
-                        Write-Log "Removed empty directory: $($dir.FullName)" -Level DEBUG
+    if ($SkipEmptyDirCleanup) {
+        Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipEmptyDirCleanup switch." -Level INFO
+    } else {
+        Write-Log "Starting empty directory cleanup under $ArchivePath..." -Level INFO
+        try {
+            $emptyDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory | Sort-Object FullName -Descending
+            $removedCount = 0
+            foreach ($dir in $emptyDirs) {
+                # Never remove the root archive path itself
+                if ($dir.FullName -eq (Resolve-Path $ArchivePath)) { continue }
+                $children = Get-ChildItem -Path $dir.FullName -Force
+                if ($children.Count -eq 0) {
+                    if ($Execute) {
+                        try {
+                            Remove-Item -Path $dir.FullName -Force -ErrorAction Stop
+                            Write-Log "Removed empty directory: $($dir.FullName)" -Level DEBUG
+                            $removedCount++
+                        } catch {
+                            Write-Log "Failed to remove empty directory: $($dir.FullName) - $($_.Exception.Message)" -Level WARNING
+                        }
+                    } else {
+                        Write-Log "Would remove empty directory: $($dir.FullName)" -Level DEBUG
                         $removedCount++
-                    } catch {
-                        Write-Log "Failed to remove empty directory: $($dir.FullName) - $($_.Exception.Message)" -Level WARNING
                     }
-                } else {
-                    Write-Log "Would remove empty directory: $($dir.FullName)" -Level DEBUG
-                    $removedCount++
                 }
             }
+            if ($removedCount -gt 0) {
+                $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run)" }
+                Write-Log $msg -Level INFO
+            } else {
+                Write-Log "No empty directories found to remove under $ArchivePath" -Level INFO
+            }
+        } catch {
+            Write-Log "Error during empty directory cleanup: $($_.Exception.Message)" -Level WARNING
         }
-        if ($removedCount -gt 0) {
-            $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run)" }
-            Write-Log $msg -Level INFO
-        } else {
-            Write-Log "No empty directories found to remove under $ArchivePath" -Level INFO
-        }
-    } catch {
-        Write-Log "Error during empty directory cleanup: $($_.Exception.Message)" -Level WARNING
     }
     # --- End Empty Directory Cleanup ---
 
