@@ -5,6 +5,7 @@
 # 2. Verify -Execute flag is properly checked before deletion
 # 3. Add detailed logging around deletion operations
 # 4. Test with small set of files before full run
+# 5. Clean up unused variable 'scriptStartTime' (line 1084) and 'scriptStopTime' (line 1100)
 
 # Script Parameters
 [CmdletBinding(DefaultParameterSetName='Help')]
