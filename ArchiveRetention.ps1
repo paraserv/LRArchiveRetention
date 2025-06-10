@@ -5,12 +5,6 @@ param (
         Position=0,
         ParameterSetName='Execute',
         HelpMessage="Path to archive directory that needs to be processed")]
-    [ValidateScript({
-        if(-Not (Test-Path $_) ){
-            throw "Archive path does not exist: $_"
-        }
-        return $true
-    })]
     [string]$ArchivePath,
     
     [Parameter(Mandatory=$true,
@@ -32,22 +26,6 @@ param (
     
     [Parameter(Mandatory=$false,
         ParameterSetName='Execute',
-        HelpMessage="Maximum number of concurrent operations for parallel processing")]
-    [ValidateRange(1,32)]
-    [int]$MaxConcurrency = 8,
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="File extensions to exclude (e.g., '.tmp', '.log')")]
-    [string[]]$ExcludeFileTypes = @(),
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="File extensions to include. If specified, only these types will be processed")]
-    [string[]]$IncludeFileTypes = @('.lca'),
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
         HelpMessage="Maximum number of retries for failed operations")]
     [ValidateRange(0,10)]
     [int]$MaxRetries = 3,
@@ -58,23 +36,6 @@ param (
     [ValidateRange(1,300)]
     [int]$RetryDelaySeconds = 5,
     
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Number of files to process in each batch")]
-    [ValidateRange(100,5000)]
-    [int]$BatchSize = 2000,
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Enable caching of directory scanning results")]
-    [switch]$UseCache,
-
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Number of hours that the cache remains valid")]
-    [ValidateRange(1,72)]
-    [int]$CacheValidityHours = 12,
-
     [Parameter(ParameterSetName='Help')]
     [switch]$Help
 )
@@ -101,8 +62,8 @@ COMMON OPTIONS:
     -Execute         Actually perform the operations (default: dry-run)
     -IncludeFileTypes Files to include (default: .lca)
     -ExcludeFileTypes Files to exclude (default: none)
-    -UseCache        Enable caching (default: false)
-    -MaxConcurrency  Max parallel operations (default: 8)
+    -MaxRetries      Maximum number of retries for failed operations. Default: 3
+    -RetryDelaySeconds Delay between retries in seconds. Default: 5
 
 EXAMPLES:
     ./$scriptName -ArchivePath "\\server\share" -RetentionDays 90
@@ -149,29 +110,11 @@ if ($MyInvocation.BoundParameters.Count -eq 0) {
 .PARAMETER LogFile
     Path to the log file. Defaults to script directory.
 
-.PARAMETER MaxConcurrency
-    Maximum number of concurrent operations. Default: 8
-
-.PARAMETER ExcludeFileTypes
-    Array of file extensions to exclude. Default: none
-
-.PARAMETER IncludeFileTypes
-    Array of file extensions to include. If specified, only these types will be processed.
-
 .PARAMETER MaxRetries
     Maximum number of retries for failed operations. Default: 3
 
 .PARAMETER RetryDelaySeconds
     Delay between retries in seconds. Default: 5
-
-.PARAMETER BatchSize
-    Number of files to process in each batch. Default: 2000
-
-.PARAMETER UseCache
-    Enable caching of directory scanning results. Default: False
-
-.PARAMETER CacheValidityHours
-    Number of hours that the cache remains valid. Default: 12
 
 .EXAMPLE
     .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
@@ -898,7 +841,15 @@ function Get-FilesRecursively {
         
         # Get all files
         Write-Log "Scanning directory: $Path" -Level INFO
-        $allFiles = Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue
+        try {
+            $allFiles = Get-ChildItem -Path $Path -Recurse -File -Force -ErrorAction Stop
+        } catch {
+            Write-Log "Error enumerating files in path: $Path" -Level WARNING
+            Write-Log "Exception: $($_.Exception.Message)" -Level WARNING
+            Write-Log "StackTrace: $($_.ScriptStackTrace)" -Level WARNING
+            $allFiles = @()
+        }
+        $allFiles = $allFiles | Where-Object { $_ -ne $null }
         
         # Apply file type filters
         if ($IncludeFileTypes -or $ExcludeFileTypes) {
@@ -951,7 +902,7 @@ function Complete-ScriptExecution {
     if ([string]::IsNullOrWhiteSpace($Message)) {
         $Message = "No additional information provided"
     }
-    
+    $defaultSuccessMsg = "Script completed successfully"
     try {
         # Mark script as completed
         $script:completed = $true
@@ -960,7 +911,6 @@ function Complete-ScriptExecution {
         # Calculate elapsed time
         $scriptCompleted = $script:endTime
         $tz = [System.TimeZoneInfo]::Local
-        Write-Log "Script completed at (local): $($scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')) ($($tz.DisplayName))" -Level INFO
         $elapsed = $script:endTime - $script:startTime
         $elapsedTimeStr = '{0:hh\:mm\:ss\.fff}' -f $elapsed
         
@@ -973,7 +923,6 @@ function Complete-ScriptExecution {
             } catch {
                 Write-Log "Error disposing progress timer: $($_.Exception.Message)" -Level WARNING
             }
-            
             # Clear any progress display
             try {
                 Write-Progress -Activity "" -Completed -ErrorAction SilentlyContinue
@@ -982,13 +931,14 @@ function Complete-ScriptExecution {
         
         # Log completion status
         if ($Success) {
-            Write-Log "=================================================================" -Level INFO
-            Write-Log "SCRIPT COMPLETED SUCCESSFULLY" -Level INFO
-            Write-Log "Execution time: $elapsedTimeStr" -Level INFO
-            if (![string]::IsNullOrEmpty($Message)) {
+            $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
+            $statusLine = "SCRIPT COMPLETED SUCCESSFULLY (local: $localTime, elapsed: $elapsedTimeStr)"
+            Write-Log $statusLine -Level INFO
+            if (![string]::IsNullOrEmpty($Message) -and $Message -ne $defaultSuccessMsg -and $Message -ne 'No additional information provided') {
                 Write-Log $Message -Level INFO
             }
         } else {
+            Write-Log "Script completed at (local): $($scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')) ($($tz.DisplayName))" -Level ERROR
             Write-Log "=================================================================" -Level ERROR
             Write-Log "SCRIPT FAILED" -Level ERROR
             Write-Log "Execution time: $elapsedTimeStr" -Level ERROR
@@ -1078,7 +1028,6 @@ try {
     }
     
     $scriptStartTime = Get-Date
-    $mode = if ($Execute) { "EXECUTION" } else { "DRY RUN" }
     
     # Minimum retention safety mechanism
     $MINIMUM_RETENTION_DAYS = 90
@@ -1115,19 +1064,29 @@ try {
     Write-Log "  Include File Types: $($IncludeFileTypes -join ', ')" -Level INFO
     Write-Log "  Exclude File Types: $(if ($ExcludeFileTypes.Count -eq 0) { '(none)' } else { $ExcludeFileTypes -join ', ' })" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
-    Write-Log "  Max Concurrency: $MaxConcurrency" -Level INFO
-    Write-Log "  Max Retries: $MaxRetries" -Level INFO
-    Write-Log "  Retry Delay: ${RetryDelaySeconds}s" -Level INFO
-    Write-Log "  Batch Size: $BatchSize" -Level INFO
-    Write-Log "  Use Cache: $UseCache" -Level INFO
-    Write-Log "  Cache Validity: ${CacheValidityHours}h" -Level INFO
+    
+    # Before file enumeration, add robust path validation and error handling.
+    if (-not (Test-Path $ArchivePath)) {
+        $msg = "ERROR: Archive path '$ArchivePath' does not exist or is not accessible. This may be due to network issues, permissions, or the path being unavailable in this session."
+        Write-Log $msg -Level FATAL
+        Write-Host $msg -ForegroundColor Red
+        Write-Log "Current user: $([System.Environment]::UserDomainName)\$([System.Environment]::UserName)" -Level ERROR
+        Write-Log "Working directory: $(Get-Location)" -Level ERROR
+        Write-Log "If this is a network path, ensure it is accessible and that the script is running as a user with appropriate permissions." -Level ERROR
+        exit 1
+    }
     
     # Count files that would be processed
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
-    $allFiles = Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction SilentlyContinue | 
-               Where-Object { $_.LastWriteTime -lt $cutoffDate -and 
-                              ($IncludeFileTypes.Count -eq 0 -or $IncludeFileTypes -contains $_.Extension) -and
-                              ($ExcludeFileTypes.Count -eq 0 -or $ExcludeFileTypes -notcontains $_.Extension) }
+    try {
+        $allFiles = Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction Stop
+    } catch {
+        Write-Log "Error enumerating files in path: $ArchivePath" -Level WARNING
+        Write-Log "Exception: $($_.Exception.Message)" -Level WARNING
+        Write-Log "StackTrace: $($_.ScriptStackTrace)" -Level WARNING
+        $allFiles = @()
+    }
+    $allFiles = $allFiles | Where-Object { $_ -ne $null }
     
     $totalSizeMB = [math]::Round(($allFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
     Write-Log "Found $($allFiles.Count) files ($totalSizeMB MB) that would be processed (older than $RetentionDays days)" -Level INFO
@@ -1146,64 +1105,51 @@ try {
     $processedSize = 0
     $errorCount = 0
     $successCount = 0
-    $currentBatch = @()
-    $batchNumber = 0
     $processingStartTime = Get-Date
     foreach ($file in $allFiles) {
-        $currentBatch += $file
-        if ($currentBatch.Count -ge $BatchSize -or $file -eq $allFiles[-1]) {
-            $batchNumber++
-            $batchStartTime = Get-Date
-            Write-Log "Processing batch $batchNumber ($($currentBatch.Count) files)..." -Level DEBUG
-            foreach ($batchFile in $currentBatch) {
-                try {
-                    if ($Execute) {
-                        Invoke-WithRetry -Operation {
-                            Remove-Item -LiteralPath $batchFile.FullName -Force -ErrorAction Stop
-                        } -Description "Delete file: $($batchFile.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
-                        # Log deletion at DEBUG unless -Verbose
-                        Write-Log "Deleted file: $($batchFile.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
-                        if ($script:DeletionLogWriter) {
-                            try {
-                                $script:DeletionLogWriter.WriteLine($batchFile.FullName)
-                                $script:DeletionLogWriter.Flush()
-                            } catch {
-                                Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
-                            }
-                        }
-                    } else {
-                        Write-Log "Would delete: $($batchFile.FullName)" -Level DEBUG
-                    }
-                    $successCount++
-                    $processedSize += $batchFile.Length
-                } catch {
-                    Write-Log "Error processing file $($batchFile.FullName): $($_.Exception.Message)" -Level ERROR
-                    $errorCount++
-                    if ($errorCount -gt 100) {
-                        Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
-                        throw "Excessive errors during processing"
+        try {
+            if ($Execute) {
+                Invoke-WithRetry -Operation {
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                } -Description "Delete file: $($file.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
+                # Log deletion at DEBUG unless -Verbose
+                Write-Log "Deleted file: $($file.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
+                if ($script:DeletionLogWriter) {
+                    try {
+                        $script:DeletionLogWriter.WriteLine($file.FullName)
+                        $script:DeletionLogWriter.Flush()
+                    } catch {
+                        Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
                     }
                 }
-                $processedCount++
-                $script:processedCount = $processedCount
-                $script:processedSize = $processedSize
+            } else {
+                Write-Log "Would delete: $($file.FullName)" -Level DEBUG
             }
+            $successCount++
+            $processedSize += $file.Length
+        } catch {
+            Write-Log "Error processing file $($file.FullName): $($_.Exception.Message)" -Level ERROR
+            $errorCount++
+            if ($errorCount -gt 100) {
+                Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
+                throw "Excessive errors during processing"
+            }
+        }
+        $processedCount++
+        $script:processedCount = $processedCount
+        $script:processedSize = $processedSize
+        $now = Get-Date
+        $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
+        if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
             $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
-            $script:progressPercent = $percentComplete
-            $now = Get-Date
-            if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
-                $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
-                $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
-                Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files)" -Level INFO
-                Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
-                Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
-                Write-Log "  Rate: $rate" -Level INFO
-                Write-Log "  Estimated time remaining: $eta" -Level INFO
-                $script:lastProgressUpdate = $now
-            }
-            $currentBatch = @()
-            $batchTime = (Get-Date) - $batchStartTime
-            Write-Log "Batch $batchNumber completed in $($batchTime.TotalSeconds.ToString('0.0')) seconds" -Level DEBUG
+            $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
+            $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
+            Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) at $elapsedSeconds seconds run-time" -Level INFO
+            Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+            Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+            Write-Log "  Rate: $rate" -Level INFO
+            Write-Log "  Estimated time remaining: $eta" -Level INFO
+            $script:lastProgressUpdate = $now
         }
     }
     $processingTime = $null
@@ -1219,7 +1165,7 @@ try {
     }
     $processingTimeStr = if ($processingTime -is [TimeSpan]) { '{0:hh\:mm\:ss}' -f $processingTime } else { 'Unknown' }
     Write-Log " " -Level INFO
-    Write-Log "Phase 2 Complete:" -Level INFO
+    Write-Log "Processing Complete:" -Level INFO
     Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
     Write-Log "  Successfully Processed: $successCount" -Level INFO
     Write-Log "  Failed: $errorCount" -Level INFO
@@ -1227,7 +1173,49 @@ try {
     Write-Log "  Processing Rate: $(Get-ProcessingRate -StartTime $script:startTime -ProcessedCount $processedCount)" -Level INFO
     Write-Log "  Elapsed Time: $elapsedTimeStr" -Level INFO
 
-    Complete-ScriptExecution -Success $true -Message "Script completed successfully"
+    # After the main loop, always log a final progress update at 100% with total elapsed time
+    $finalElapsedSeconds = [math]::Round(((Get-Date) - $processingStartTime).TotalSeconds, 1)
+    Write-Log "Progress: 100% ($processedCount of $($allFiles.Count) files) at $finalElapsedSeconds seconds run-time" -Level INFO
+    Write-Log "  Processed: $([math]::Round($processedSize/1MB,2)) MB of $totalSizeMB MB" -Level INFO
+    Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+    Write-Log "  Rate: $(Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount)" -Level INFO
+    Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
+
+    # --- Empty Directory Cleanup ---
+    try {
+        $emptyDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory | Sort-Object FullName -Descending
+        $removedCount = 0
+        foreach ($dir in $emptyDirs) {
+            # Never remove the root archive path itself
+            if ($dir.FullName -eq (Resolve-Path $ArchivePath)) { continue }
+            $children = Get-ChildItem -Path $dir.FullName -Force
+            if ($children.Count -eq 0) {
+                if ($Execute) {
+                    try {
+                        Remove-Item -Path $dir.FullName -Force -ErrorAction Stop
+                        Write-Log "Removed empty directory: $($dir.FullName)" -Level DEBUG
+                        $removedCount++
+                    } catch {
+                        Write-Log "Failed to remove empty directory: $($dir.FullName) - $($_.Exception.Message)" -Level WARNING
+                    }
+                } else {
+                    Write-Log "Would remove empty directory: $($dir.FullName)" -Level DEBUG
+                    $removedCount++
+                }
+            }
+        }
+        if ($removedCount -gt 0) {
+            $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run)" }
+            Write-Log $msg -Level INFO
+        } else {
+            Write-Log "No empty directories found to remove under $ArchivePath" -Level INFO
+        }
+    } catch {
+        Write-Log "Error during empty directory cleanup: $($_.Exception.Message)" -Level WARNING
+    }
+    # --- End Empty Directory Cleanup ---
+
+    Complete-ScriptExecution -Success $true
 }
 catch {
     $errorMsg = if ([string]::IsNullOrWhiteSpace($_.Exception.Message)) { "An unknown unhandled error occurred" } else { $_.Exception.Message }
