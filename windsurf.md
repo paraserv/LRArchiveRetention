@@ -17,10 +17,10 @@ scp -i ~/.ssh/id_rsa_windows file.ps1 administrator@10.20.1.200:'C:/LogRhythm/Sc
 ### Run Script
 ```bash
 # Dry run (no changes)
-ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -ArchivePath ''D:\LogRhythmArchives'' -RetentionDays 120 -Verbose }"'
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -ArchivePath ''D:\LogRhythmArchives\InactiveTest'' -RetentionDays 120 -Verbose }"'
 
 # With execute (delete files)
-ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -ArchivePath ''D:\LogRhythmArchives'' -RetentionDays 120 -Execute -Verbose }"'
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -ArchivePath ''D:\LogRhythmArchives\InactiveTest'' -RetentionDays 120 -Execute -Verbose }"'
 ```
 
 ## Common Tasks
@@ -28,7 +28,7 @@ ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -E
 ### Check Files
 ```bash
 # List files with details
-ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -Command "Get-ChildItem -Path ''D:\LogRhythmArchives'' -Recurse -File | Sort-Object LastWriteTime | Select-Object -First 5 FullName, LastWriteTime, @{Name=''DaysOld'';Expression={[math]::Round(((Get-Date) - $_.LastWriteTime).TotalDays, 2)}} | Format-Table -AutoSize"'
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -Command "Get-ChildItem -Path ''D:\LogRhythmArchives\InactiveTest'' -Recurse -File | Sort-Object LastWriteTime | Select-Object -First 5 FullName, LastWriteTime, @{Name=''DaysOld'';Expression={[math]::Round(((Get-Date) - $_.LastWriteTime).TotalDays, 2)}} | Format-Table -AutoSize"'
 ```
 
 ### Check Logs
