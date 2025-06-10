@@ -1,3 +1,11 @@
+# TODO: Fix file deletion logic - Currently, files are not being deleted when -Execute flag is used
+# Issue: The script identifies files correctly but doesn't perform the actual deletions
+# Next steps:
+# 1. Locate where file processing and deletion should occur (likely in batch processing section)
+# 2. Verify -Execute flag is properly checked before deletion
+# 3. Add detailed logging around deletion operations
+# 4. Test with small set of files before full run
+
 # Script Parameters
 [CmdletBinding(DefaultParameterSetName='Help')]
 param (
