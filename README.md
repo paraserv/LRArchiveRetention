@@ -80,7 +80,7 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 | `-LogPath`        | Path to log file                                         | `./ArchiveRetention.log`|
 | `-MaxRetries`     | Maximum number of retries for failed operations          | `3`                     |
 | `-RetryDelaySeconds` | Delay between retry attempts in seconds               | `1`                     |
-| `-SkipEmptyDirCleanup` | Skip empty directory cleanup after file processing   | `$false`                |
+| `-SkipDirCleanup` | Skip empty directory cleanup after file processing   | `$false`                |
 | `-IncludeFileTypes` | File types to include (e.g., '.lca', '.txt'). Defaults to '.lca'. | `'.lca'`                |
 | `-Verbose`        | Detailed or debug logging level                          | Optional                |
 

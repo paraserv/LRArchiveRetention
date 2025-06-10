@@ -39,15 +39,15 @@
 
 .EXAMPLE
     .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
-    (Dry run: shows what would be deleted)
+    (Dry run: shows summary of what would be deleted)
 
 .EXAMPLE
     .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 365 -Execute
     (Actually deletes files older than 365 days)
 
 .EXAMPLE
-    .\ArchiveRetention.ps1 -Help
-    (Shows this help)
+    .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 365 -Verbose
+    (Displays detailed logging, including every file that would be deleted; but in dry-run mode)
 
 .NOTES
     Requires PowerShell 5.1 or later
@@ -92,7 +92,7 @@ param (
     [int]$RetryDelaySeconds = 1,
     
     [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="Skip empty directory cleanup after file processing")]
-    [switch]$SkipEmptyDirCleanup,
+    [switch]$SkipDirCleanup,
     
     [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="File types to include (default: .lca)")]
     [string[]]$IncludeFileTypes = @('.lca'),
@@ -1169,7 +1169,7 @@ try {
     Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
 
     # --- Empty Directory Cleanup ---
-    if ($SkipEmptyDirCleanup) {
+    if ($SkipDirCleanup) {
         Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipEmptyDirCleanup switch." -Level INFO
     } else {
         Write-Log "Starting empty directory cleanup under $ArchivePath..." -Level INFO
