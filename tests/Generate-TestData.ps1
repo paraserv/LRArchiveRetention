@@ -3,15 +3,31 @@
 .SYNOPSIS
     Generate ultra-high-performance test directories and files for ArchiveRetention.ps1 testing.
 .DESCRIPTION
-    This script creates 5000 date-based folders, each with 20-500 .lca files named with the folder's date and a timestamp (max 10MB). 
-    File dates are within ±5 days of the folder date. One .txt file is placed in the root for extension testing. 
-    Heavily optimized for maximum I/O performance with pre-allocated buffers, reduced syscalls, and efficient parallelism.
-    
-    **Requires PowerShell 7+ (Core) for -Parallel support.**
+    This script attempts to create a large, realistic test set for ArchiveRetention.ps1: thousands of date-based folders, each with many .lca files named with the folder's date and a timestamp (max 10MB). File dates are within ±5 days of the folder date. One .txt file is placed in the root for extension testing.
+
+    **Disk Safety:**
+    The script will automatically scale down the number of folders and/or files per folder as needed to ensure that at least 20% of the disk remains free after generation. If there is not enough space for the requested test set, the script will reduce the number of files per folder (down to MinFiles), and if needed, reduce the number of folders. If even the minimum scale would exceed the limit, the script aborts.
+
+    **Performance:**
+    Heavily optimized for maximum I/O performance with pre-allocated buffers, reduced syscalls, and efficient parallelism. Requires PowerShell 7+ (Core) for -Parallel support.
 .PARAMETER RootPath
     The root directory where test data will be created. Defaults to D:\LogRhythmArchives\Test
+.PARAMETER FolderCount
+    The requested number of folders to create (auto-scaled down if needed for disk safety).
+.PARAMETER MinFiles
+    The minimum number of files per folder.
+.PARAMETER MaxFiles
+    The maximum number of files per folder (auto-scaled down if needed for disk safety).
+.PARAMETER MaxFileSizeMB
+    The maximum file size in MB (actual file sizes are random up to this value).
+.PARAMETER ThrottleLimit
+    The number of parallel threads to use (default: 2x CPU count).
 .EXAMPLE
-    .\Generate-TestData.ps1 -RootPath 'D:\LogRhythmArchives\Test'
+    .\Generate-TestData.ps1 -RootPath 'D:\LogRhythmArchives\Test' -FolderCount 5000 -MinFiles 20 -MaxFiles 500 -MaxFileSizeMB 10
+    # Attempts to create 5000 folders with 20-500 files each, but will auto-scale down if disk space is insufficient to leave 20% free.
+.EXAMPLE
+    .\Generate-TestData.ps1 -RootPath 'D:\Test' -FolderCount 10000 -MinFiles 10 -MaxFiles 100 -MaxFileSizeMB 5
+    # If disk space is insufficient, the script will reduce MaxFiles and/or FolderCount to fit, always leaving 20% free.
 #>
 param(
     [string]$RootPath = "D:\LogRhythmArchives\Test",
