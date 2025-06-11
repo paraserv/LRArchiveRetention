@@ -72,21 +72,30 @@ This command will actually delete the files. Use with caution.
 .\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 365 -Execute
 ```
 
-### Saving a Credential for a Network Share
+### Using Network Shares (UNC Paths)
 
-This command prompts you to enter a username and password, then saves them securely for the target `LR_NAS`. This only needs to be done once per machine.
+Accessing network shares requires a two-step process to ensure credentials are handled securely.
 
-```powershell
-.\ArchiveRetention.ps1 -SaveCredential -CredentialTarget "LR_NAS" -ArchivePath "\\10.20.1.7\LRArchives"
-```
+**Step 1: Save the Credential (One-Time Setup)**
 
-### Execute Deletion on a Network Share
-
-This command uses the previously saved `LR_NAS` credential to connect to the network share and delete files older than 180 days.
+First, you must run the `Save-Credential.ps1` helper script **interactively** on the server where the main script will run (e.g., in an RDP session or at the console). This securely saves the network credential on the machine. This only needs to be done once per credential.
 
 ```powershell
-.\ArchiveRetention.ps1 -ArchivePath "\\10.20.1.7\LRArchives" -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
+# This script is located in the same directory as ArchiveRetention.ps1
+# It will prompt for a password.
+.\Save-Credential.ps1 -CredentialTarget "LR_NAS" -SharePath "\\\\10.20.1.7\\LRArchives"
 ```
+
+**Step 2: Run the Main Script with the Saved Credential**
+
+Once the credential is saved, you can run the main `ArchiveRetention.ps1` script from any context (interactive, scheduled task, SSH) using the `-CredentialTarget` parameter to specify which saved credential to use.
+
+```powershell
+# This command uses the saved 'LR_NAS' credential to connect and run.
+.\ArchiveRetention.ps1 -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
+```
+
+> **Note:** The `-ArchivePath` is no longer needed when using `-CredentialTarget`, as the path is retrieved from the saved credential information.
 
 ### Scheduled Task Example
 
@@ -115,11 +124,7 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 -   `-SkipEmptyDirCleanup` (switch): Skips removing empty directories after processing.
 -   `-IncludeFileTypes` (string[]): File extensions to include (default: `@('.lca')`).
 
-### For Managing Credentials
 
--   `-SaveCredential` (switch): Engages the credential saving mode.
--   `-CredentialTarget` (string, mandatory): A unique name to identify the credential (e.g., `NAS_Archive`).
--   `-ArchivePath` (string, mandatory): The UNC path to the network share (e.g., `\\nas\archive`).
 
 ## Best Practices
 
@@ -138,9 +143,14 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 10. **Run as a user with appropriate permissions**: Ensure the account running the script has read/write access to the archive or network share. For UNC paths, verify permissions on the share and NTFS.
 
 ### Secure Credential Management
-The script includes a robust, cross-platform credential management system for securely handling passwords for network share access. It uses AES-256 encryption with a machine-specific key to ensure credentials are never stored in plain text. This method is suitable for non-interactive scheduled tasks running as a service account.
+The script uses a secure, two-part workflow for handling credentials for network shares, designed for reliability in automated environments.
 
-For detailed information on the implementation and usage, see the [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md).
+1.  **Interactive Setup (`Save-Credential.ps1`)**: A dedicated helper script is provided for the one-time, interactive saving of credentials. This script must be run in a full interactive Windows session (like RDP or a direct console login). It uses the standard `Get-Credential` prompt to securely capture the username and password.
+2.  **Non-Interactive Execution (`ArchiveRetention.ps1`)**: The main script is designed for non-interactive use (e.g., scheduled tasks, SSH sessions). It **never** prompts for a password. Instead, it uses credentials that have been previously saved with the helper script.
+
+This separation of concerns ensures that passwords are never sent over non-interactive channels or stored in script files. The credentials themselves are stored on disk using AES-256 encryption with a machine-specific key, making them secure and portable across PowerShell versions.
+
+For more technical details, see the [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md).
 
 ## Troubleshooting
 
