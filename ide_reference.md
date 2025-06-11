@@ -28,6 +28,25 @@ ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -E
 # If RetentionDays < 90, the script will enforce 90 days for deletion and log a warning.
 ```
 
+### Network Share Access (Credential Target System)
+
+For network shares, use the two-step credential system:
+
+#### Step 1: Save Credentials (one-time)
+```bash
+# Run on the server (interactive session required)
+.\Save-Credential.ps1 -Target "10.20.1.7" -SharePath "\\10.20.1.7\LRArchives"
+# Enter username/password when prompted
+```
+
+**Note:** The target name (e.g., "10.20.1.7") is just an identifier - you can use any name. The credential store saves both the share path AND credentials together.
+
+#### Step 2: Use Saved Credentials
+```bash
+# No need to specify share path - it's retrieved from the credential store
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -CredentialTarget ''10.20.1.7'' -RetentionDays 180 -Execute }"'
+```
+
 ## Common Tasks
 
 ### List Files with Details

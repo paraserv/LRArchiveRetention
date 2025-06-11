@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 # run-archive-retention-tests.sh
 #
 # Run all core ArchiveRetention.ps1 test scenarios via SSH from your Mac/Linux machine.
@@ -29,7 +30,14 @@ run_network_test() {
   local ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -CredentialTarget '$CREDENTIAL_TARGET' $ps_args -Verbose"
 
   local final_ssh_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $ps_command }\""
+
+  # Execute and capture exit code
   $SSH_CMD "$final_ssh_command"
+  local exit_code=$?
+  if [ $exit_code -ne 0 ]; then
+    echo "!!! TEST FAILED: '$test_name' exited with code $exit_code."
+    exit 1
+  fi
 }
 
 # Function for tests targeting a local path on the remote server
@@ -45,7 +53,14 @@ run_local_test() {
   local ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -ArchivePath '$local_archive_path' $ps_args -Verbose"
 
   local final_ssh_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $ps_command }\""
+
+  # Execute and capture exit code
   $SSH_CMD "$final_ssh_command"
+  local exit_code=$?
+  if [ $exit_code -ne 0 ]; then
+    echo "!!! TEST FAILED: '$test_name' exited with code $exit_code."
+    exit 1
+  fi
 }
 
 # --- Test Cases ---
