@@ -63,23 +63,24 @@
 #>
 
 # Script Parameters
-[CmdletBinding(DefaultParameterSetName='Execute')]
+[CmdletBinding(DefaultParameterSetName='LocalPath')]
 param(
-    # --- Parameter Set: Execute for file processing ---
-    [Parameter(Mandatory = $true, Position = 0, HelpMessage = "Path to the archive directory to process.")]
+    # --- Parameter Set: LocalPath for local file processing ---
+    [Parameter(Mandatory = $true, ParameterSetName = 'LocalPath', Position = 0, HelpMessage = "Path to the local archive directory to process.")]
     [string]$ArchivePath,
 
+    # --- Parameter Set: NetworkShare for remote file processing ---
+    [Parameter(Mandatory = $true, ParameterSetName = 'NetworkShare', HelpMessage = "The name of the saved credential to use for network access.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage('PSAvoidUsingPlainTextForPassword', '', Justification = 'CredentialTarget is a name/identifier, not a password.')]
+    [string]$CredentialTarget,
+
+    # --- Common Parameters for both sets ---
     [Parameter(Mandatory = $true, Position = 1, HelpMessage = "Number of days to retain files.")]
     [ValidateRange(1, 3650)]
     [int]$RetentionDays,
 
     [Parameter(Mandatory = $false, HelpMessage = "Actually perform file operations. Default is a dry-run.")]
     [switch]$Execute,
-
-    # --- Common Parameters for Execution ---
-    [Parameter(Mandatory = $true, HelpMessage = "The name of the saved credential to use for network access.")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage('PSAvoidUsingPlainTextForPassword', '', Justification = 'CredentialTarget is a name/identifier, not a password.')]
-    [string]$CredentialTarget,
 
     [Parameter(Mandatory = $false, HelpMessage = "Path to the log file.")]
     [string]$LogPath,
@@ -92,10 +93,10 @@ param(
     [ValidateRange(1, 300)]
     [int]$RetryDelaySeconds = 1,
 
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Skip empty directory cleanup after file processing.")]
+    [Parameter(Mandatory = $false, HelpMessage = "Skip empty directory cleanup after file processing.")]
     [switch]$SkipDirCleanup,
 
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "File types to include (e.g., '.lca').")]
+    [Parameter(Mandatory = $false, HelpMessage = "File types to include (e.g., '.lca').")]
     [string[]]$IncludeFileTypes = @('.lca'),
 
     # --- Help Parameter ---
@@ -208,27 +209,22 @@ if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
     Write-Log "CredentialTarget '$CredentialTarget' specified. Attempting to map network drive." -Level INFO
     try {
         $credentialInfo = Get-ShareCredential -Target $CredentialTarget
+
         if ($null -eq $credentialInfo) {
-            throw "Credential with target '$CredentialTarget' not found. Please save it first using the Save-Credential.ps1 script."
+            $errorMsg = "Failed to retrieve saved credential for target '$CredentialTarget'. Please run Save-Credential.ps1 first."
+            Write-Log $errorMsg -Level FATAL
+            Complete-ScriptExecution -Success $false -Message $errorMsg
+            exit 1
         }
 
-        # Extract credential and path from the returned object
-        $credential = $credentialInfo.Credential
-        $sharePath = $credentialInfo.SharePath
-
         # Create a temporary PSDrive
-        $tempDriveName = "archive_$(Get-Random -Minimum 1000 -Maximum 9999)"
-        Write-Log "Creating temporary PSDrive '$tempDriveName' for path '$sharePath'..." -Level DEBUG
-        
-        # Suppress the output of New-PSDrive and capture potential errors
-        New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $sharePath -Credential $credential -ErrorAction Stop
-        
-        # Update ArchivePath to use the new drive
-        $ArchivePath = "$tempDriveName`:\"
-        Write-Log "Successfully mapped '$($credential.SharePath)' to '$ArchivePath'." -Level INFO
+        $tempDriveName = "ArchiveMount" # A fixed but temporary name
+        $ArchivePath = $credentialInfo.SharePath
+        New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $credentialInfo.SharePath -Credential $credentialInfo.Credential -ErrorAction Stop
+        $ArchivePath = (Get-PSDrive $tempDriveName).Root
 
     } catch {
-        $errorMsg = "Failed to establish connection to network share using credential '$CredentialTarget'. Error: $($_.Exception.Message)"
+        $errorMsg = "Failed to map network drive using credential '$CredentialTarget'. Error: $($_.Exception.Message)"
         Write-Log $errorMsg -Level FATAL
         Complete-ScriptExecution -Success $false -Message $errorMsg
         exit 1
