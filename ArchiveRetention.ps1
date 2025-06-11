@@ -75,28 +75,35 @@ param(
     [string]$CredentialTarget,
 
     # --- Common Parameters for both sets ---
-    [Parameter(Mandatory = $true, Position = 1, HelpMessage = "Number of days to retain files.")]
+    [Parameter(Mandatory = $true, ParameterSetName = 'LocalPath', Position = 1, HelpMessage = "Number of days to retain files.")]
+    [Parameter(Mandatory = $true, ParameterSetName = 'NetworkShare', Position = 1, HelpMessage = "Number of days to retain files.")]
     [ValidateRange(1, 3650)]
     [int]$RetentionDays,
 
-    [Parameter(Mandatory = $false, HelpMessage = "Actually perform file operations. Default is a dry-run.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Actually perform file operations. Default is a dry-run.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Actually perform file operations. Default is a dry-run.")]
     [switch]$Execute,
 
-    [Parameter(Mandatory = $false, HelpMessage = "Path to the log file.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Path to the log file.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Path to the log file.")]
     [string]$LogPath,
 
-    [Parameter(Mandatory = $false, HelpMessage = "Maximum number of retries for failed operations.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Maximum number of retries for failed operations.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Maximum number of retries for failed operations.")]
     [ValidateRange(0, 10)]
     [int]$MaxRetries = 3,
 
-    [Parameter(Mandatory = $false, HelpMessage = "Delay in seconds between retry attempts.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Delay in seconds between retry attempts.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Delay in seconds between retry attempts.")]
     [ValidateRange(1, 300)]
     [int]$RetryDelaySeconds = 1,
 
-    [Parameter(Mandatory = $false, HelpMessage = "Skip empty directory cleanup after file processing.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Skip empty directory cleanup after file processing.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Skip empty directory cleanup after file processing.")]
     [switch]$SkipDirCleanup,
 
-    [Parameter(Mandatory = $false, HelpMessage = "File types to include (e.g., '.lca').")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "File types to include (e.g., '.lca').")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "File types to include (e.g., '.lca').")]
     [string[]]$IncludeFileTypes = @('.lca'),
 
     # --- Help Parameter ---
@@ -1184,6 +1191,7 @@ try {
     } else {
         Write-Log "Warning: processingStartTime is not a DateTime. Type: $($processingStartTime.GetType().FullName), value: $processingStartTime" -Level WARNING
     }
+    $processingTimeStr = if ($processingTime -is [TimeSpan]) { '{0:hh\:mm\:ss}' -f $processingTime } else { 'Unknown' }
     Write-Log " " -Level INFO
     Write-Log "Processing Complete:" -Level INFO
     Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
@@ -1205,7 +1213,7 @@ try {
 
     # --- Empty Directory Cleanup ---
     if ($SkipDirCleanup) {
-        Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipEmptyDirCleanup switch." -Level INFO
+        Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipDirCleanup switch." -Level INFO
     } else {
         Write-Log "Starting empty directory cleanup under $ArchivePath..." -Level INFO
         try {

@@ -1,50 +1,75 @@
-# (This file will be renamed to run-archive-retention-tests.sh)
+#!/bin/bash
 # run-archive-retention-tests.sh
 #
 # Run all core ArchiveRetention.ps1 test scenarios via SSH from your Mac/Linux machine.
-# Usage: bash RunArchiveRetentionTests.sh
-#
-# Requirements:
-# - SSH key and server details as in ide_reference.md
-# - ArchiveRetention.ps1 and test data present on the server
-#
-# This script will:
-# - Run each test scenario
-# - Print output for each
-# - Make it easy to extend with more scenarios
-#
-# See test-plan.md and readme-test-automation.md for details.
+# Usage: bash tests/RunArchiveRetentionTests.sh
 
-SSH="ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR administrator@10.20.1.200"
-# Using Windows Credential Manager with the service account
+# --- Configuration ---
+SSH_USER="administrator"
+SSH_HOST="10.20.1.200"
+SSH_KEY="~/.ssh/id_rsa_windows"
 CREDENTIAL_TARGET="10.20.1.7"
-BASE_CMD="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath '\\\\10.20.1.7\\LRArchives' -CredentialTarget '$CREDENTIAL_TARGET'"
+REMOTE_SCRIPT_DIR='C:\LogRhythm\Scripts\ArchiveV2'
+# In bash, to represent a literal UNC path in a variable, it's safest to use single quotes
+# or correctly escaped double quotes. We use double quotes here for consistency.
+ARCHIVE_PATH="\\\\10.20.1.7\\LRArchives"
 
-run_test() {
-  local desc="$1"
-  local args="$2"
-  echo "\n=== $desc ==="
-  $SSH "$BASE_CMD $args -Verbose }\""
+SSH_CMD="ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o LogLevel=ERROR ${SSH_USER}@${SSH_HOST}"
+
+# --- Helper Functions ---
+
+# Function for tests targeting the network share using -CredentialTarget
+run_network_test() {
+  local test_name="$1"
+  local ps_args="$2"
+
+  echo -e "\n--- Running Network Test: $test_name ---"
+
+  # Command for the NetworkShare parameter set
+  local ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -CredentialTarget '$CREDENTIAL_TARGET' $ps_args -Verbose"
+
+  local final_ssh_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $ps_command }\""
+  $SSH_CMD "$final_ssh_command"
 }
 
-run_test "Dry-Run Mode (No Deletions, 20 days)" "-RetentionDays 20"
-run_test "Execute Mode (Deletions, 20 days)" "-RetentionDays 20 -Execute"
-run_test "Minimum Retention (Below Minimum, 10 days, Dry-Run)" "-RetentionDays 10"
-run_test "Minimum Retention (Below Minimum, 10 days, Execute)" "-RetentionDays 10 -Execute"
-run_test "Maximum Retention (3650 days, Execute)" "-RetentionDays 3650 -Execute"
-run_test "Include Only .lca and .txt Files (20 days)" "-RetentionDays 20 -IncludeFileTypes .lca,.txt"
-# Skipping ExcludeFileTypes test: parameter not supported
-run_test "Custom Log Path (20 days)" "-RetentionDays 20 -LogPath '\\\\10.20.1.7\\LRArchives\\Test\\custom.log'"
-# For Non-Existent Archive Path, override the base command
-nonexistent_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath '\\\\10.20.1.7\\DoesNotExist' -RetentionDays 20 -Verbose }\""
-echo "\n=== Non-Existent Archive Path ==="
-$SSH "$nonexistent_cmd"
-# For Help Output, run with only -Help
-help_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -Help }\""
-echo "\n=== Help Output ==="
-$SSH "$help_cmd"
-run_test "Non-Existent Archive Path" "-RetentionDays 20 -ArchivePath '\\\\10.20.1.7\\DoesNotExist'"
-run_test "Help Output" "-Help"
-run_test "Custom Retention Actions Path (20 days, Execute)" "-RetentionDays 20 -RetentionActionsPath '\\\\10.20.1.7\\LRArchives\\custom_retention.log' -Execute"
+# Function for tests targeting a local path on the remote server
+run_local_test() {
+  local test_name="$1"
+  local ps_args="$2"
+  # Use a dummy local path for testing purposes
+  local local_archive_path="C:\\Temp\\ArchiveTest"
 
-# Add more run_test calls for additional scenarios as needed 
+  echo -e "\n--- Running Local Test: $test_name ---"
+
+  # Command for the LocalPath parameter set
+  local ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -ArchivePath '$local_archive_path' $ps_args -Verbose"
+
+  local final_ssh_command="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $ps_command }\""
+  $SSH_CMD "$final_ssh_command"
+}
+
+# --- Test Cases ---
+
+# Network Share Tests
+run_network_test "Dry-Run Mode (No Deletions, 20 days)" "-RetentionDays 20 -SkipDirCleanup"
+run_network_test "Execute Mode (Deletions, 20 days)" "-RetentionDays 20 -Execute -SkipDirCleanup"
+run_network_test "Minimum Retention (Below Minimum, 10 days, Dry-Run)" "-RetentionDays 10 -SkipDirCleanup"
+run_network_test "Minimum Retention (Below Minimum, 10 days, Execute)" "-RetentionDays 10 -Execute -SkipDirCleanup"
+run_network_test "Maximum Retention (3650 days, Execute)" "-RetentionDays 3650 -Execute -SkipDirCleanup"
+run_network_test "Include Only .lca and .txt Files (20 days)" "-IncludeFileTypes .lca,.txt -RetentionDays 20 -SkipDirCleanup"
+
+# Local Path Tests (using a dummy path for syntax validation)
+run_local_test "Custom Log Path (20 days)" "-LogPath 'C:\\Temp\\custom.log' -RetentionDays 20"
+
+# --- Special Test Cases (cannot use the helper function) ---
+
+echo -e "\n--- Running Test: Non-Existent Archive Path (Local) ---"
+NON_EXISTENT_PATH="C:\\DoesNotExist"
+non_existent_ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -ArchivePath '$NON_EXISTENT_PATH' -RetentionDays 20 -Verbose"
+$SSH_CMD "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $non_existent_ps_command }\""
+
+echo -e "\n--- Running Test: Help Output ---"
+help_ps_command="cd '$REMOTE_SCRIPT_DIR'; .\\ArchiveRetention.ps1 -Help"
+$SSH_CMD "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { $help_ps_command }\""
+
+echo -e "\n--- All tests complete. ---"
