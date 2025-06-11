@@ -77,37 +77,46 @@ Accessing network shares requires a two-step process to ensure credentials are h
 
 **Step 1: Save the Credential (One-Time Setup)**
 
-First, you must run the `Save-Credential.ps1` helper script **interactively** on the server where the main script will run (e.g., in an RDP session or at the console). This securely saves the network credential on the machine. This only needs to be done once per credential.
-
-This script is located in the same directory as ArchiveRetention.ps1 and will prompt for a password.
+Use the `Save-Credential.ps1` script to securely store credentials for a network share:
 
 ```powershell
-.\Save-Credential.ps1 -CredentialTarget "LR_NAS" -SharePath "\\10.20.1.7\LRArchives"
+# Save credentials for a network share (-Target is the name/label of the credential)
+.\Save-Credential.ps1 -Target "10.20.1.7" -SharePath "\\10.20.1.7\LRArchives"
+# You'll be prompted for username and password
 ```
 
-**Step 2: Run the Main Script with the Saved Credential**
+**Important:** The credential system stores both:
+- The network share path (e.g., `\\10.20.1.7\LRArchives`)
+- The username and password for accessing it
 
-Once the credential is saved, you can run the main `ArchiveRetention.ps1` script from any context (interactive, scheduled task, SSH) using the `-CredentialTarget` parameter to specify which saved credential to use.
+You can use any name as the target - it's just an identifier. For example:
+- `-Target "10.20.1.7"` (using IP address)
+- `-Target "LR_NAS"` (using a friendly name)
+- `-Target "Archive_Server"` (descriptive name)
+
+**Step 2: Run the Script Using the Saved Credential**
+
+When running the archive retention script, you only need to specify the credential target name:
 
 ```powershell
-# This command uses the saved 'LR_NAS' credential to connect and run.
-.\ArchiveRetention.ps1 -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
+# Use the saved credential (no need to specify the share path)
+.\ArchiveRetention.ps1 -CredentialTarget "10.20.1.7" -RetentionDays 180
+
+# With execution
+.\ArchiveRetention.ps1 -CredentialTarget "10.20.1.7" -RetentionDays 180 -Execute
 ```
 
-> **Note:** The `-ArchivePath` is no longer needed when using `-CredentialTarget`, as the path is retrieved from the saved credential information.
+The script automatically:
+1. Retrieves the stored credentials for the target
+2. Gets the share path from the credential store
+3. Maps the network share using those credentials
+4. Processes files at that location
 
-### Scheduled Task Example
-
-Create a scheduled task to run the script weekly:
-
-```powershell
-$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\LogRhythm\Scripts\ArchiveV2\ArchiveRetention.ps1" -ArchivePath "D:\LogRhythmArchives" -RetentionDays 365 -Execute'
-$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 2am
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -RunOnlyIfNetworkAvailable
-Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -TaskName "LogRhythm Archive Retention" -Description "Runs LogRhythm archive retention weekly to ensure InactiveArchives are not retained past the specified number of days" -User "SYSTEM" -RunLevel Highest
-```
-
-> **Note**: Run the scheduled task as SYSTEM or a service account with appropriate permissions.
+This design provides several benefits:
+- **Security**: Credentials are encrypted and stored securely
+- **Convenience**: No need to remember or type UNC paths repeatedly
+- **Automation-friendly**: Perfect for scheduled tasks - no paths or credentials in scripts
+- **Flexibility**: Can use meaningful names instead of IP addresses
 
 ## Parameters
 

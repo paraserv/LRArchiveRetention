@@ -33,7 +33,7 @@
 .PARAMETER RetryDelaySeconds
     Delay between retry attempts in seconds. Default: 1
 
-.PARAMETER SkipEmptyDirCleanup
+.PARAMETER SkipDirCleanup
     If specified, skips the empty directory cleanup step after file processing. Default: cleanup is performed.
 
 .PARAMETER IncludeFileTypes
@@ -111,6 +111,79 @@ param(
     [switch]$Help
 )
 
+# Define Write-Log function before it's used
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false, Position=0)]
+        [AllowEmptyString()]
+        [string]$Message = " ",
+        
+        [Parameter(Position=1)]
+        [ValidateSet('DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL', 'VERBOSE')]
+        [string]$Level = 'INFO',
+        
+        [switch]$NoConsoleOutput
+    )
+    
+    # Handle empty, null, or whitespace-only messages
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return
+    }
+    
+    # Filter DEBUG/VERBOSE unless -Verbose is set
+    if (($Level -eq 'DEBUG' -or $Level -eq 'VERBOSE') -and $VerbosePreference -ne 'Continue') {
+        return
+    }
+    
+    # Get current timestamp
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    
+    # Format the log message
+    $logMessage = "$timestamp [$Level] - $Message"
+    
+    # Write to console if not suppressed
+    if (-not $NoConsoleOutput) {
+        switch ($Level) {
+            'ERROR'   { Write-Host $logMessage -ForegroundColor Red }
+            'WARNING' { Write-Host $logMessage -ForegroundColor Yellow }
+            'INFO'    { Write-Host $logMessage -ForegroundColor White }
+            'DEBUG'   { Write-Debug $logMessage }
+            'FATAL'   { Write-Host $logMessage -BackgroundColor Red -ForegroundColor White }
+            'VERBOSE' { if ($VerbosePreference -eq 'Continue') { Write-Host $logMessage -ForegroundColor Gray } }
+            default   { Write-Host $logMessage }
+        }
+    }
+    
+    # Write to log file if path is set
+    if (-not [string]::IsNullOrEmpty($script:LogFile)) {
+        try {
+            # Check if log rotation is needed (every 100 log entries to reduce overhead)
+            if ($script:LogEntryCount -ge 100) {
+                $script:LogEntryCount = 0
+                Invoke-LogRotation -LogFile $script:LogFile -MaxLogSizeMB 10 -MaxLogFiles 10
+            }
+            # Append to log file using BOM-less StreamWriter
+            $sw = New-Object System.IO.StreamWriter($script:LogFile, $true, ([System.Text.UTF8Encoding]::new($false)))
+            $sw.WriteLine($logMessage)
+            $sw.Close()
+        } catch {
+            # If we can't write to the log file, write to console and continue
+            Write-Host "WARNING: Failed to write to log file: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    
+    # Write to log file if writer is available
+    if ($script:LogWriter -and -not $script:LogWriter.BaseStream.IsClosed) {
+        try {
+            $script:LogWriter.WriteLine($logMessage)
+            $script:LogWriter.Flush()
+        } catch {
+            Write-Error "Failed to write to log file: $($_.Exception.Message)"
+        }
+    }
+}
+
 # Function to clean up script resources and finalize execution
 function Complete-ScriptExecution {
     [CmdletBinding()]
@@ -119,10 +192,6 @@ function Complete-ScriptExecution {
         [string]$Message = $null
     )
     
-    # Ensure Message is never null or empty
-    if ([string]::IsNullOrWhiteSpace($Message)) {
-        $Message = "No additional information provided"
-    }
     $defaultSuccessMsg = "Script completed successfully"
     try {
         # Mark script as completed
@@ -156,8 +225,6 @@ function Complete-ScriptExecution {
             Write-Log $statusLine -Level INFO
             if (-not [string]::IsNullOrWhiteSpace($Message) -and $Message -ne $defaultSuccessMsg) {
                 Write-Log " - $Message" -Level INFO
-            } else {
-                Write-Log '' -Level INFO
             }
         } else {
             $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
@@ -165,8 +232,6 @@ function Complete-ScriptExecution {
             Write-Log $statusLine -Level ERROR
             if (-not [string]::IsNullOrWhiteSpace($Message)) {
                 Write-Log " - Reason: $Message" -Level ERROR
-            } else {
-                Write-Log '' -Level ERROR
             }
         }
     } catch {
@@ -267,77 +332,7 @@ $script:DeletionLogWriter = $null
 $script:LogEntryCount = -1
 
 # Define Write-Log function before it's used
-function Write-Log {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$false, Position=0)]
-        [AllowEmptyString()]
-        [string]$Message = " ",
-        
-        [Parameter(Position=1)]
-        [ValidateSet('DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL', 'VERBOSE')]
-        [string]$Level = 'INFO',
-        
-        [switch]$NoConsoleOutput
-    )
-    
-    # Handle empty, null, or whitespace-only messages
-    if ([string]::IsNullOrWhiteSpace($Message)) {
-        return
-    }
-    
-    # Filter DEBUG/VERBOSE unless -Verbose is set
-    if (($Level -eq 'DEBUG' -or $Level -eq 'VERBOSE') -and $VerbosePreference -ne 'Continue') {
-        return
-    }
-    
-    # Get current timestamp
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-    
-    # Format the log message
-    $logMessage = "$timestamp [$Level] - $Message"
-    
-    # Write to console if not suppressed
-    if (-not $NoConsoleOutput) {
-        switch ($Level) {
-            'ERROR'   { Write-Host $logMessage -ForegroundColor Red }
-            'WARNING' { Write-Host $logMessage -ForegroundColor Yellow }
-            'INFO'    { Write-Host $logMessage -ForegroundColor White }
-            'DEBUG'   { Write-Debug $logMessage }
-            'FATAL'   { Write-Host $logMessage -BackgroundColor Red -ForegroundColor White }
-            'VERBOSE' { if ($VerbosePreference -eq 'Continue') { Write-Host $logMessage -ForegroundColor Gray } }
-            default   { Write-Host $logMessage }
-        }
-    }
-    
-    # Write to log file if path is set
-    if (-not [string]::IsNullOrEmpty($script:LogFile)) {
-        try {
-            # Check if log rotation is needed (every 100 log entries to reduce overhead)
-            if ($script:LogEntryCount -ge 100) {
-                $script:LogEntryCount = 0
-                Invoke-LogRotation -LogFile $script:LogFile -MaxLogSizeMB 10 -MaxLogFiles 10
-            }
-            # Append to log file using BOM-less StreamWriter
-            $sw = New-Object System.IO.StreamWriter($script:LogFile, $true, ([System.Text.UTF8Encoding]::new($false)))
-            $sw.WriteLine($logMessage)
-            $sw.Close()
-        } catch {
-            # If we can't write to the log file, write to console and continue
-            Write-Host "WARNING: Failed to write to log file: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
-    }
-    
-    # Write to log file if writer is available
-    if ($script:LogWriter -and -not $script:LogWriter.BaseStream.IsClosed) {
-        try {
-            $script:LogWriter.WriteLine($logMessage)
-            $script:LogWriter.Flush()
-        } catch {
-            Write-Error "Failed to write to log file: $($_.Exception.Message)"
-        }
-    }
-}
+# (Implementation is at the beginning of the script)
 
 # Set up retention actions log if in execute mode
 if ($Execute) {
@@ -402,9 +397,6 @@ try {
 } catch {
     Write-Warning "Failed to register PowerShell.Exiting event handler: $($_.Exception.Message)" 
 }
-
-# Function to write log messages
-# (Implementation is at the beginning of the script)
 
 # Initialize logging
 function Initialize-Logging {
