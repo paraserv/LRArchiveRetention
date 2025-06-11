@@ -25,7 +25,6 @@ This script is specifically designed for use with LogRhythm (LR7 SIEM) environme
 - Windows Server
 - PowerShell 5.1 or later
 - Appropriate permissions on LogRhythm archive directories (whether local or via a UNC share)
-- Sufficient disk space for log files
 
 ## Installation
 
@@ -80,10 +79,10 @@ Accessing network shares requires a two-step process to ensure credentials are h
 
 First, you must run the `Save-Credential.ps1` helper script **interactively** on the server where the main script will run (e.g., in an RDP session or at the console). This securely saves the network credential on the machine. This only needs to be done once per credential.
 
+This script is located in the same directory as ArchiveRetention.ps1 and will prompt for a password.
+
 ```powershell
-# This script is located in the same directory as ArchiveRetention.ps1
-# It will prompt for a password.
-.\Save-Credential.ps1 -CredentialTarget "LR_NAS" -SharePath "\\\\10.20.1.7\\LRArchives"
+.\Save-Credential.ps1 -CredentialTarget "LR_NAS" -SharePath "\\10.20.1.7\LRArchives"
 ```
 
 **Step 2: Run the Main Script with the Saved Credential**
