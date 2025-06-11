@@ -99,7 +99,12 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 8. **Expect longer initial run times**: The first time you run the script (especially with `-Execute`), it may take significantly longer than subsequent runs, since it will likely have much more data to delete. Consider staging a few initial runs with larger retention days before getting to your target and setting up a scheduled task. Regular daily or weekly scheduled runs will typically be much faster.
 9. **Always use UNC paths for network shares**: Use paths like `\\server\share\folder` instead of mapped drives (e.g., `Z:`). Mapped drives are session-specific and may not be available in scheduled tasks, SSH, or service contexts.
 10. **Run as a user with appropriate permissions**: Ensure the account running the script has read/write access to the archive or network share. For UNC paths, verify permissions on the share and NTFS.
-11. **For scheduled tasks or services**: Use UNC paths and run as a service account with explicit permissions to the share. Avoid relying on mapped drives.
+
+### Secure Credential Management
+The script includes a robust, cross-platform credential management system for securely handling passwords for network share access. It uses AES-256 encryption with a machine-specific key to ensure credentials are never stored in plain text. This method is suitable for non-interactive scheduled tasks running as a service account.
+
+For detailed information on the implementation and usage, see the [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md).
+
 ## Troubleshooting
 
 ### Common Issues

@@ -10,8 +10,8 @@
 *.temp
 
 # PowerShell modules
-*.psd1
-*.psm1
+#*.psd1
+#*.psm1
 
 # VS Code settings
 .vscode/
@@ -36,9 +36,10 @@ ehthumbs.db
 # Localization files
 *.resx
 
-# Build results
-bin/
-obj/
+# Test data and reports
+/TestResults/
+/tests/TestData/
+/tests/CredentialStore/
 
 # Cache directory
 __pycache__/
