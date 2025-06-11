@@ -1,4 +1,33 @@
-# ArchiveRetention.ps1 Comprehensive Test Plan
+# test-plan.md
+
+## Test Data Generation (Prerequisite)
+
+Before running core tests, generate realistic test data using `GenerateTestData.ps1`:
+
+```bash
+scp -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR tests/GenerateTestData.ps1 administrator@10.20.1.200:'C:/LogRhythm/Scripts/ArchiveV2/tests/'
+ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR administrator@10.20.1.200 \
+  "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:/LogRhythm/Scripts/ArchiveV2/tests'; ./GenerateTestData.ps1 -RootPath 'D:/LogRhythmArchives/Test' }\""
+```
+- This script auto-scales the test data set and is required before running core tests.
+- Output will summarize the number of files/folders created.
+
+---
+
+## Automated Test Execution (Canonical Method)
+
+To run all core ArchiveRetention.ps1 tests in a repeatable, automated way, use the `RunArchiveRetentionTests.sh` script from your Mac/Linux machine:
+
+```bash
+cd tests
+bash RunArchiveRetentionTests.sh
+```
+- This script uses SSH and PowerShell to execute all core and edge-case test scenarios on the Windows server, matching the patterns in ide-reference.md.
+- Output for each test is printed, including warnings, errors, and summary.
+- To add more scenarios, edit the script and add more `run_test` calls.
+- After each run, review the output and logs for validation.
+
+---
 
 ## Purpose
 This document outlines all recommended tests to ensure the ArchiveRetention.ps1 script is robust, safe, and reliable in a wide range of real-world and edge-case scenarios.
@@ -169,6 +198,34 @@ This document outlines all recommended tests to ensure the ArchiveRetention.ps1 
 
 ---
 
+## 14. Additional Parameter and Edge-Case Tests
+
+### 14.1 Include Only .lca and .txt Files
+- **Test:** Run with `-IncludeFileTypes .lca,.txt`.
+- **Expected:** Only .lca and .txt files are considered for deletion.
+
+### 14.2 Exclude .txt Files
+- **Test:** Run with `-ExcludeFileTypes .txt`.
+- **Expected:** .txt files are ignored; only .lca files are processed.
+
+### 14.3 Custom Log Path
+- **Test:** Run with `-LogPath` set to a custom file.
+- **Expected:** Log output is written to the specified file.
+
+### 14.4 Non-Existent Archive Path
+- **Test:** Run with a bogus `-ArchivePath`.
+- **Expected:** Script logs a clear error and exits safely.
+
+### 14.5 Help Output
+- **Test:** Run with `-Help`.
+- **Expected:** Help message is displayed.
+
+### 14.6 Custom Retention Actions Path
+- **Test:** Run with `-RetentionActionsPath` set to a custom file and `-Execute`.
+- **Expected:** Retention actions are logged to the specified file.
+
+Add results to the tracking table below after each run.
+
 # Test Tracking Table
 
 | Test # | Description | Pass/Fail | Notes |
@@ -176,6 +233,14 @@ This document outlines all recommended tests to ensure the ArchiveRetention.ps1 
 | 1.1    | Dry-Run Mode |           |       |
 | 1.2    | Execute Mode |           |       |
 | ...    | ...         |           |       |
+| 14.1   | Include Only .lca and .txt Files |           |       |
+| 14.2   | Exclude .txt Files |           |       |
+| 14.3   | Custom Log Path |           |       |
+| 14.4   | Non-Existent Archive Path |           |       |
+| 14.5   | Help Output |           |       |
+| 14.6   | Custom Retention Actions Path |           |       |
+
+> **To re-run all core tests and evaluate results, use `RunArchiveRetentionTests.sh` as described above.**
 
 ---
 
