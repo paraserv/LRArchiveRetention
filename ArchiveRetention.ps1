@@ -5,6 +5,8 @@
 .DESCRIPTION
     This script processes files in a specified directory (including subdirectories) and deletes files that are older than the specified retention period.
 
+    For network shares, it uses a secure, two-step credential workflow. A separate helper script, Save-Credential.ps1, is used for the one-time interactive saving of a credential. The main script then uses this saved credential for non-interactive execution.
+
     Features:
     - Batch and robust deletion with retry logic
     - File type filtering (include/exclude)
@@ -37,6 +39,9 @@
 .PARAMETER IncludeFileTypes
     File types to include (e.g., '.lca', '.txt'). Defaults to '.lca'.
 
+.PARAMETER CredentialTarget
+    The name of a credential previously saved with the Save-Credential.ps1 helper script. When this is used, the script will connect to the network share associated with that credential, and the -ArchivePath parameter is not needed.
+
 .EXAMPLE
     .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
     (Dry run: shows summary of what would be deleted)
@@ -49,6 +54,10 @@
     .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 365 -Verbose
     (Displays detailed logging, including every file that would be deleted; but in dry-run mode)
 
+.EXAMPLE
+    .\ArchiveRetention.ps1 -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
+    (Connects to the network share associated with the 'LR_NAS' credential and deletes files older than 180 days.)
+
 .NOTES
     Requires PowerShell 5.1 or later
 #>
@@ -57,34 +66,29 @@
 [CmdletBinding(DefaultParameterSetName='Execute')]
 param(
     # --- Parameter Set: Execute for file processing ---
-    [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Execute', HelpMessage = "Path to the archive directory to process.")]
-    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "UNC path to the network share for the credential.")]
+    [Parameter(Mandatory = $true, Position = 0, HelpMessage = "Path to the archive directory to process.")]
     [string]$ArchivePath,
 
-    [Parameter(Mandatory = $true, Position = 1, ParameterSetName = 'Execute', HelpMessage = "Number of days to retain files.")]
+    [Parameter(Mandatory = $true, Position = 1, HelpMessage = "Number of days to retain files.")]
     [ValidateRange(1, 3650)]
     [int]$RetentionDays,
 
-    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "A unique name to identify the saved credential.")]
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "The name of the saved credential to use for network access.")]
-    [string]$CredentialTarget,
-
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Actually perform file operations. Default is a dry-run.")]
+    [Parameter(Mandatory = $false, HelpMessage = "Actually perform file operations. Default is a dry-run.")]
     [switch]$Execute,
 
-    # --- Parameter Set: Save a new credential ---
-    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "Switch to save a new credential.")]
-    [switch]$SaveCredential,
-
     # --- Common Parameters for Execution ---
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Path to the log file.")]
+    [Parameter(Mandatory = $true, HelpMessage = "The name of the saved credential to use for network access.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage('PSAvoidUsingPlainTextForPassword', '', Justification = 'CredentialTarget is a name/identifier, not a password.')]
+    [string]$CredentialTarget,
+
+    [Parameter(Mandatory = $false, HelpMessage = "Path to the log file.")]
     [string]$LogPath,
 
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Maximum number of retries for failed operations.")]
+    [Parameter(Mandatory = $false, HelpMessage = "Maximum number of retries for failed operations.")]
     [ValidateRange(0, 10)]
     [int]$MaxRetries = 3,
 
-    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Delay in seconds between retry attempts.")]
+    [Parameter(Mandatory = $false, HelpMessage = "Delay in seconds between retry attempts.")]
     [ValidateRange(1, 300)]
     [int]$RetryDelaySeconds = 1,
 
@@ -99,6 +103,69 @@ param(
     [switch]$Help
 )
 
+# Function to clean up script resources and finalize execution
+function Complete-ScriptExecution {
+    [CmdletBinding()]
+    param(
+        [bool]$Success = $false,
+        [string]$Message = $null
+    )
+    
+    # Ensure Message is never null or empty
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = "No additional information provided"
+    }
+    $defaultSuccessMsg = "Script completed successfully"
+    try {
+        # Mark script as completed
+        $script:completed = $true
+        $script:endTime = Get-Date
+        
+        # Calculate elapsed time
+        $scriptCompleted = $script:endTime
+        $elapsed = $script:endTime - $script:startTime
+        $elapsedTimeStr = '{0:hh\:mm\:ss\.fff}' -f $elapsed
+        
+        # Stop and dispose the progress timer if it exists
+        if ($null -ne $script:progressTimer) {
+            try {
+                $script:progressTimer.Stop()
+                $script:progressTimer.Dispose()
+                $script:progressTimer = $null
+            } catch {
+                Write-Log "Error disposing progress timer: $($_.Exception.Message)" -Level WARNING
+            }
+            # Clear any progress display
+            try {
+                Write-Progress -Activity "" -Completed -ErrorAction SilentlyContinue
+            } catch {}
+        }
+        
+        # Log completion status
+        if ($Success) {
+            $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
+            $statusLine = "SCRIPT COMPLETED SUCCESSFULLY (local: $localTime, elapsed: $elapsedTimeStr)"
+            Write-Log $statusLine -Level INFO
+            if (-not [string]::IsNullOrWhiteSpace($Message) -and $Message -ne $defaultSuccessMsg) {
+                Write-Log " - $Message" -Level INFO
+            } else {
+                Write-Log '' -Level INFO
+            }
+        } else {
+            $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
+            $statusLine = "SCRIPT FAILED (local: $localTime, elapsed: $elapsedTimeStr)"
+            Write-Log $statusLine -Level ERROR
+            if (-not [string]::IsNullOrWhiteSpace($Message)) {
+                Write-Log " - Reason: $Message" -Level ERROR
+            } else {
+                Write-Log '' -Level ERROR
+            }
+        }
+    } catch {
+        Write-Log "CRITICAL ERROR in Complete-ScriptExecution: $($_.Exception.Message)" -Level FATAL
+    }
+}
+
 # Import credential helper module
 try {
     # Assuming the module is in a 'modules' directory relative to the script
@@ -108,20 +175,6 @@ try {
 catch {
     Write-Error "Failed to import ShareCredentialHelper module from '$modulePath'. Ensure it is in the 'modules' subdirectory. Error: $($_.Exception.Message)"
     exit 1
-}
-
-# Handle SaveCredential action and exit
-if ($PSCmdlet.ParameterSetName -eq 'SaveCredential') {
-    try {
-        Write-Host "Saving credential for target '$CredentialTarget'..." -ForegroundColor Yellow
-        Save-ShareCredential -Target $CredentialTarget -SharePath $ArchivePath
-        Write-Host "Credential saved successfully for target '$CredentialTarget'." -ForegroundColor Green
-        exit 0
-    }
-    catch {
-        Write-Error "Failed to save credential: $($_.Exception.Message)"
-        exit 1
-    }
 }
 
 # Script version (single source of truth)
@@ -149,23 +202,26 @@ $script:startTime = Get-Date
 # --- Start of Script ---
 
 $tempDriveName = $null
-$originalArchivePath = $ArchivePath
 
 # Handle network credentials if a target is specified
 if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
     Write-Log "CredentialTarget '$CredentialTarget' specified. Attempting to map network drive." -Level INFO
     try {
-        $credential = Get-ShareCredential -Target $CredentialTarget
-        if ($null -eq $credential) {
-            throw "Credential with target '$CredentialTarget' not found. Please save it first using the -SaveCredential switch."
+        $credentialInfo = Get-ShareCredential -Target $CredentialTarget
+        if ($null -eq $credentialInfo) {
+            throw "Credential with target '$CredentialTarget' not found. Please save it first using the Save-Credential.ps1 script."
         }
+
+        # Extract credential and path from the returned object
+        $credential = $credentialInfo.Credential
+        $sharePath = $credentialInfo.SharePath
 
         # Create a temporary PSDrive
         $tempDriveName = "archive_$(Get-Random -Minimum 1000 -Maximum 9999)"
-        Write-Log "Creating temporary PSDrive '$tempDriveName' for path '$($credential.SharePath)'..." -Level DEBUG
+        Write-Log "Creating temporary PSDrive '$tempDriveName' for path '$sharePath'..." -Level DEBUG
         
         # Suppress the output of New-PSDrive and capture potential errors
-        $drive = New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $credential.SharePath -Credential $credential -ErrorAction Stop
+        New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $sharePath -Credential $credential -ErrorAction Stop
         
         # Update ArchivePath to use the new drive
         $ArchivePath = "$tempDriveName`:\"
@@ -923,80 +979,8 @@ function Get-FilesRecursively {
         Write-Log $_.ScriptStackTrace -Level ERROR
         return @()
     }
-}
 
-# Function to clean up script resources and finalize execution
-function Complete-ScriptExecution {
-    [CmdletBinding()]
-    param(
-        [bool]$Success = $false,
-        [string]$Message = $null
-    )
-    
-    # Ensure Message is never null or empty
-    if ([string]::IsNullOrWhiteSpace($Message)) {
-        $Message = "No additional information provided"
-    }
-    $defaultSuccessMsg = "Script completed successfully"
-    try {
-        # Mark script as completed
-        $script:completed = $true
-        $script:endTime = Get-Date
-        
-        # Calculate elapsed time
-        $scriptCompleted = $script:endTime
-        $tz = [System.TimeZoneInfo]::Local
-        $elapsed = $script:endTime - $script:startTime
-        $elapsedTimeStr = '{0:hh\:mm\:ss\.fff}' -f $elapsed
-        
-        # Stop and dispose the progress timer if it exists
-        if ($null -ne $script:progressTimer) {
-            try {
-                $script:progressTimer.Stop()
-                $script:progressTimer.Dispose()
-                $script:progressTimer = $null
-            } catch {
-                Write-Log "Error disposing progress timer: $($_.Exception.Message)" -Level WARNING
-            }
-            # Clear any progress display
-            try {
-                Write-Progress -Activity "" -Completed -ErrorAction SilentlyContinue
-            } catch {}
-        }
-        
-        # Log completion status
-        if ($Success) {
-            $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
-            $statusLine = "SCRIPT COMPLETED SUCCESSFULLY (local: $localTime, elapsed: $elapsedTimeStr)"
-            Write-Log $statusLine -Level INFO
-            if (![string]::IsNullOrEmpty($Message) -and $Message -ne $defaultSuccessMsg -and $Message -ne 'No additional information provided') {
-                Write-Log $Message -Level INFO
-            }
-        } else {
-            Write-Log "Script completed at (local): $($scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')) ($($tz.DisplayName))" -Level ERROR
-            Write-Log "=================================================================" -Level ERROR
-            Write-Log "SCRIPT FAILED" -Level ERROR
-            Write-Log "Execution time: $elapsedTimeStr" -Level ERROR
-            Write-Log "Error: $Message" -Level ERROR
-        }
-        
-        # Close the log writer
-        Close-Logging
-        
-        # Return appropriate exit code
-        if ($Success) {
-            return 0
-        } else {
-            return 1
-        }
-    }
-    catch {
-        try {
-            Write-Error "Error during script completion: $($_.Exception.Message)" -ErrorAction Continue
-            Write-Error $_.ScriptStackTrace -ErrorAction Continue
-        } catch {}
-        return 1
-    }
+
 }
 
 # Function to perform operation with retry

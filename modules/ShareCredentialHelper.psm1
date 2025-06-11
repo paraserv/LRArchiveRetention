@@ -356,14 +356,16 @@ function Save-ShareCredential {
         [Parameter(Mandatory=$true)]
         [string]$SharePath,
         
-        [System.Management.Automation.PSCredential]$Credential = $null
+        [Parameter(Mandatory=$true)]
+        [System.Management.Automation.PSCredential]$Credential
     )
     
     try {
+        Write-Log "Save-ShareCredential invoked. Target: '$Target', SharePath: '$SharePath'" -Level DEBUG
+
+
         # Initialize credential store if it doesn't exist
-        if (-not (Test-Path -Path $script:CredentialStorePath)) {
-            Initialize-CredentialStore | Out-Null
-        }
+        Initialize-CredentialStore
         
         # Create a credential object with the password as a secure string
         $credObject = [PSCustomObject]@{
@@ -456,15 +458,19 @@ function Get-ShareCredential {
             }
         }
         
-        # Create and return a PSCredential object
-        $credential = New-Object System.Management.Automation.PSCredential($credentialData.UserName, $securePassword)
+        # Create and return a custom object containing both the credential and the share path
+        $psCredential = New-Object System.Management.Automation.PSCredential($credentialData.UserName, $securePassword)
+        $result = [PSCustomObject]@{
+            Credential = $psCredential
+            SharePath  = $credentialData.SharePath
+        }
+        Write-Log "Successfully retrieved credentials for target: $Target" -Level DEBUG
         
         # Clear sensitive data from memory
         $securePassword = $null
         [System.GC]::Collect()
-        
-        Write-Log "Successfully retrieved credentials for target: $Target" -Level DEBUG
-        return $credential
+
+        return $result
     }
     catch {
         $errorMsg = "Failed to retrieve credential: $_"
@@ -517,19 +523,15 @@ function Test-ShareAccess {
                 Name = $driveLetter
                 PSProvider = 'FileSystem'
                 Root = $SharePath
-                Scope = 'Script'
                 ErrorAction = 'Stop'
             }
             
             if ($Credential) {
                 $params['Credential'] = $Credential
-                Write-Log "Using credentials for user: $($Credential.UserName)" -Level DEBUG
-            } else {
-                Write-Log "Using current user context" -Level DEBUG
             }
             
             # Create the PSDrive
-            $tempDrive = New-PSDrive @params
+            New-PSDrive @params | Out-Null
             
             # Test access by getting the root directory
             $items = Get-ChildItem -Path "${driveLetter}:\" -ErrorAction Stop
