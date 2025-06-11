@@ -1184,7 +1184,6 @@ try {
     } else {
         Write-Log "Warning: processingStartTime is not a DateTime. Type: $($processingStartTime.GetType().FullName), value: $processingStartTime" -Level WARNING
     }
-    $processingTimeStr = if ($processingTime -is [TimeSpan]) { '{0:hh\:mm\:ss}' -f $processingTime } else { 'Unknown' }
     Write-Log " " -Level INFO
     Write-Log "Processing Complete:" -Level INFO
     Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
