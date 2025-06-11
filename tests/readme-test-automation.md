@@ -14,8 +14,9 @@ This folder contains scripts to automate generating test data, running, and vali
 
 ## Quick Workflow Checklist
 1. **Generate test data on the server** using `GenerateTestData.ps1`.
-2. **Run all core and edge-case tests** using `RunArchiveRetentionTests.sh` from your Mac/Linux.
-3. **Validate logs and interpret results** using SSH and log commands.
+2. **Run all core and edge-case tests** using `RunArchiveRetentionTests.sh` from your Mac/Linux (includes a built-in concurrency lock test).
+3. **Review the on-screen summary table** or open the generated `summary_*.log` file in this `tests` folder for a concise PASS/FAIL overview.
+4. **Validate detailed logs and interpret results** using SSH and log commands.
 
 ---
 
@@ -45,7 +46,9 @@ ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR admin
 ```bash
 bash RunArchiveRetentionTests.sh
 ```
-- Runs all core and edge-case test scenarios via SSH using the PowerShell command pattern from ide-reference.md.
+- Runs all scenarios **sequentially**, automatically waiting for any previous run to finish.
+- A dedicated **concurrency lock test** launches two overlapping runs to verify that the second exits with code 9.
+- When finished, the script prints a compact summary table and writes `summary_<timestamp>.log` to this `tests` directory.
 - Prints output for each test, including warnings, errors, and summary.
 - Edit the script to add or modify test cases as needed.
 
@@ -63,7 +66,8 @@ ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR admin
 ---
 
 ## Extending the Tests
-- To add more scenarios, edit `RunArchiveRetentionTests.sh` and add more `run_test` calls.
+- To add more scenarios, edit `RunArchiveRetentionTests.sh` and add more helper calls (e.g., `run_network_test`, `run_local_test`, `run_concurrency_test`).
+- Keep the concurrency lock test as the canonical pattern for validating single-instance protection.
 - Review the test-plan.md for a list of recommended and edge-case scenarios.
 
 ---
