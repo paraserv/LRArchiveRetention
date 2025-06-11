@@ -55,6 +55,37 @@ This script is specifically designed for use with LogRhythm (LR7 SIEM) environme
 
 # Process with custom log location
 .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives" -RetentionDays 365 -LogPath "C:\Logs\archive_retention.log" -Execute
+
+### Dry Run on a Local Path
+
+This command shows what files would be deleted from a local directory. No files are actually changed.
+
+```powershell
+.\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 90
+```
+
+### Execute Deletion on a Local Path
+
+This command will actually delete the files. Use with caution.
+
+```powershell
+.\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 365 -Execute
+```
+
+### Saving a Credential for a Network Share
+
+This command prompts you to enter a username and password, then saves them securely for the target `LR_NAS`. This only needs to be done once per machine.
+
+```powershell
+.\ArchiveRetention.ps1 -SaveCredential -CredentialTarget "LR_NAS" -ArchivePath "\\10.20.1.7\LRArchives"
+```
+
+### Execute Deletion on a Network Share
+
+This command uses the previously saved `LR_NAS` credential to connect to the network share and delete files older than 180 days.
+
+```powershell
+.\ArchiveRetention.ps1 -ArchivePath "\\10.20.1.7\LRArchives" -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
 ```
 
 ### Scheduled Task Example
@@ -72,17 +103,23 @@ Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Ta
 
 ## Parameters
 
-| Parameter         | Description                                               | Default/Required         |
-|-------------------|----------------------------------------------------------|-------------------------|
-| `-ArchivePath`    | Path to LogRhythm archive directory                      | Required                |
-| `-RetentionDays`  | Number of days to retain archive files                   | Required                |
-| `-Execute`        | Perform actual file deletions (otherwise dry-run)        | `$false`                |
-| `-LogPath`        | Path to log file                                         | `./ArchiveRetention.log`|
-| `-MaxRetries`     | Maximum number of retries for failed operations          | `3`                     |
-| `-RetryDelaySeconds` | Delay between retry attempts in seconds               | `1`                     |
-| `-SkipDirCleanup` | Skip empty directory cleanup after file processing   | `$false`                |
-| `-IncludeFileTypes` | File types to include (e.g., '.lca', '.txt'). Defaults to '.lca'. | `'.lca'`                |
-| `-Verbose`        | Detailed or debug logging level                          | Optional                |
+### For Processing Files
+
+-   `-ArchivePath` (string, mandatory): Path to the local directory or network share to process.
+-   `-RetentionDays` (int, mandatory): Number of days to retain files. Files older than this will be deleted.
+-   `-Execute` (switch): Performs the deletion. Without this, the script runs in a dry-run mode.
+-   `-CredentialTarget` (string): The name of a saved credential to use for accessing a network share.
+-   `-LogPath` (string): Path to the log file. Defaults to a `script_logs` folder.
+-   `-MaxRetries` (int): Maximum number of retries for failed deletions (default: 3).
+-   `-RetryDelaySeconds` (int): Delay in seconds between retries (default: 1).
+-   `-SkipEmptyDirCleanup` (switch): Skips removing empty directories after processing.
+-   `-IncludeFileTypes` (string[]): File extensions to include (default: `@('.lca')`).
+
+### For Managing Credentials
+
+-   `-SaveCredential` (switch): Engages the credential saving mode.
+-   `-CredentialTarget` (string, mandatory): A unique name to identify the credential (e.g., `NAS_Archive`).
+-   `-ArchivePath` (string, mandatory): The UNC path to the network share (e.g., `\\nas\archive`).
 
 ## Best Practices
 
