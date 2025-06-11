@@ -251,7 +251,7 @@ catch {
 }
 
 # Script version (single source of truth)
-$SCRIPT_VERSION = '1.0.13'
+$SCRIPT_VERSION = '1.0.14'
 
 # Show help if no parameters are provided or -Help is used
 if ($Help -or $MyInvocation.BoundParameters.Count -eq 0) {
@@ -273,6 +273,28 @@ $ErrorActionPreference = 'Stop'  # Make errors terminating by default
 $script:startTime = Get-Date
 
 # --- Start of Script ---
+
+# -------------------------------------------------------------
+# Single-instance lock (prevents concurrent executions)
+# -------------------------------------------------------------
+$script:LockFilePath = Join-Path -Path $env:TEMP -ChildPath "ArchiveRetention.lock"
+try {
+    $script:LockFileStream = [System.IO.FileStream]::new(
+        $script:LockFilePath,
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None)
+    # Record PID and timestamp for diagnostics
+    $pidInfo = [System.Text.Encoding]::UTF8.GetBytes("$PID`n$(Get-Date)")
+    $script:LockFileStream.SetLength(0)
+    $script:LockFileStream.Write($pidInfo, 0, $pidInfo.Length)
+    $script:LockFileStream.Flush()
+    Write-Log "Acquired single-instance lock ($script:LockFilePath)" -Level DEBUG
+}
+catch [System.IO.IOException] {
+    Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
+    exit 9
+}
 
 $tempDriveName = $null
 
@@ -1264,6 +1286,16 @@ finally {
     if ($null -ne $tempDriveName -and (Get-PSDrive $tempDriveName -ErrorAction SilentlyContinue)) {
         Write-Log "Removing temporary PSDrive '$tempDriveName'..." -Level DEBUG
         Remove-PSDrive -Name $tempDriveName -Force -ErrorAction SilentlyContinue
+    }
+
+    # Release single-instance lock
+    if ($script:LockFileStream) {
+        try {
+            $script:LockFileStream.Close()
+            $script:LockFileStream.Dispose()
+            Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+            Write-Log "Released single-instance lock." -Level DEBUG
+        } catch {}
     }
 
     if (-not $script:completed) {
