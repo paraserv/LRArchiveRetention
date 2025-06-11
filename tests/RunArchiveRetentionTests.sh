@@ -16,7 +16,9 @@
 # See test-plan.md and readme-test-automation.md for details.
 
 SSH="ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR administrator@10.20.1.200"
-BASE_CMD="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\LogRhythm\Scripts\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath 'D:\LogRhythmArchives\Test'"
+# Using Windows Credential Manager with the service account
+CREDENTIAL_TARGET="10.20.1.7"
+BASE_CMD="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath '\\\\10.20.1.7\\LRArchives' -CredentialTarget '$CREDENTIAL_TARGET'"
 
 run_test() {
   local desc="$1"
@@ -32,17 +34,17 @@ run_test "Minimum Retention (Below Minimum, 10 days, Execute)" "-RetentionDays 1
 run_test "Maximum Retention (3650 days, Execute)" "-RetentionDays 3650 -Execute"
 run_test "Include Only .lca and .txt Files (20 days)" "-RetentionDays 20 -IncludeFileTypes .lca,.txt"
 # Skipping ExcludeFileTypes test: parameter not supported
-run_test "Custom Log Path (20 days)" "-RetentionDays 20 -LogPath 'D:\LogRhythmArchives\Test\custom.log'"
+run_test "Custom Log Path (20 days)" "-RetentionDays 20 -LogPath '\\\\10.20.1.7\\LRArchives\\Test\\custom.log'"
 # For Non-Existent Archive Path, override the base command
-nonexistent_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\LogRhythm\Scripts\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath 'D:\DoesNotExist' -RetentionDays 20 -Verbose }\""
+nonexistent_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -ArchivePath '\\\\10.20.1.7\\DoesNotExist' -RetentionDays 20 -Verbose }\""
 echo "\n=== Non-Existent Archive Path ==="
 $SSH "$nonexistent_cmd"
 # For Help Output, run with only -Help
-help_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\LogRhythm\Scripts\ArchiveV2'; .\\ArchiveRetention.ps1 -Help }\""
+help_cmd="powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\ArchiveRetention.ps1 -Help }\""
 echo "\n=== Help Output ==="
 $SSH "$help_cmd"
-run_test "Non-Existent Archive Path" "-RetentionDays 20 -ArchivePath 'D:\DoesNotExist'"
+run_test "Non-Existent Archive Path" "-RetentionDays 20 -ArchivePath '\\\\10.20.1.7\\DoesNotExist'"
 run_test "Help Output" "-Help"
-run_test "Custom Retention Actions Path (20 days, Execute)" "-RetentionDays 20 -RetentionActionsPath 'D:\LogRhythmArchives\Test\custom_retention.log' -Execute"
+run_test "Custom Retention Actions Path (20 days, Execute)" "-RetentionDays 20 -RetentionActionsPath '\\\\10.20.1.7\\LRArchives\\custom_retention.log' -Execute"
 
 # Add more run_test calls for additional scenarios as needed 

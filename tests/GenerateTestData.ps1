@@ -22,20 +22,26 @@
     The maximum file size in MB (actual file sizes are random up to this value).
 .PARAMETER ThrottleLimit
     The number of parallel threads to use (default: 2x CPU count).
+.PARAMETER MaxSizeGB
+    The maximum total size (in GB) of all generated test data. If set, the script will auto-scale down the number of folders/files to not exceed this cap. Especially useful for UNC/NAS paths where disk space checks are not possible.
 .EXAMPLE
     .\Generate-TestData.ps1 -RootPath 'D:\LogRhythmArchives\Test' -FolderCount 5000 -MinFiles 20 -MaxFiles 500 -MaxFileSizeMB 10
     # Attempts to create 5000 folders with 20-500 files each, but will auto-scale down if disk space is insufficient to leave 20% free.
 .EXAMPLE
     .\Generate-TestData.ps1 -RootPath 'D:\Test' -FolderCount 10000 -MinFiles 10 -MaxFiles 100 -MaxFileSizeMB 5
     # If disk space is insufficient, the script will reduce MaxFiles and/or FolderCount to fit, always leaving 20% free.
+.EXAMPLE
+    .\Generate-TestData.ps1 -RootPath '\\10.20.1.7\LRArchives' -FolderCount 5000 -MinFiles 20 -MaxFiles 500 -MaxFileSizeMB 10 -MaxSizeGB 2
+    # Will not generate more than 2GB of test data, auto-scaling down if needed.
 #>
 param(
-    [string]$RootPath = "D:\LogRhythmArchives\Test",
+    [string]$RootPath = "\\10.20.1.7\LRArchives",
     [int]$FolderCount = 5000,
     [int]$MinFiles = 20,
     [int]$MaxFiles = 500,
     [int]$MaxFileSizeMB = 10,
-    [int]$ThrottleLimit = [Environment]::ProcessorCount * 2  # Auto-detect optimal parallelism
+    [int]$ThrottleLimit = [Environment]::ProcessorCount * 2,  # Auto-detect optimal parallelism
+    [double]$MaxSizeGB = $null  # Optional: hard cap for total generated data (UNC-safe)
 )
 
 # Require PowerShell 7+ for -Parallel
@@ -81,11 +87,26 @@ $AllFolderData = [System.Collections.Generic.List[PSCustomObject]]::new($FolderC
 $TotalEstimatedFiles = 0
 
 # Disk space check and estimation
-$drive = [System.IO.DriveInfo]::new((Split-Path $RootPath -Qualifier))
-$freeSpace = $drive.AvailableFreeSpace
-$totalDisk = $drive.TotalSize
-$minFreeFraction = 0.2  # Leave at least 20% free
-$minFreeBytes = $totalDisk * $minFreeFraction
+if ($RootPath -match '^[\\]{2}') {
+    if ($MaxSizeGB -ne $null) {
+        $maxAllowedBytes = $MaxSizeGB * 1GB
+        Write-Host "UNC path detected. Using -MaxSizeGB = $MaxSizeGB GB as the hard cap for generated data." -ForegroundColor Yellow
+    } else {
+        Write-Warning "Disk space checks are not supported for UNC paths and -MaxSizeGB was not specified. No safety auto-scaling will be performed! Ensure sufficient free space on the NAS!"
+        $maxAllowedBytes = $null
+    }
+    $freeSpace = $null
+    $totalDisk = $null
+    $minFreeFraction = 0.2  # Leave at least 20% free (not enforced)
+    $minFreeBytes = $null
+} else {
+    $drive = [System.IO.DriveInfo]::new((Split-Path $RootPath -Qualifier))
+    $freeSpace = $drive.AvailableFreeSpace
+    $totalDisk = $drive.TotalSize
+    $minFreeFraction = 0.2  # Leave at least 20% free
+    $minFreeBytes = $totalDisk * $minFreeFraction
+    $maxAllowedBytes = $null
+}
 
 # Estimate total required space
 $estimatedTotalFiles = $FolderCount * [math]::Round(($MinFiles + $MaxFiles) / 2)
@@ -95,48 +116,55 @@ $estimatedTotalBytes = $estimatedTotalFiles * ($MaxFileSizeMB * 1024 * 1024 / 2)
 $safetyMargin = 0.1
 $requiredSpace = $estimatedTotalBytes * (1 + $safetyMargin)
 
-Write-Host "\nDisk space check:" -ForegroundColor Yellow
-Write-Host "  Total disk: $([math]::Round($totalDisk/1GB,2)) GB" -ForegroundColor White
-Write-Host "  Available: $([math]::Round($freeSpace/1GB,2)) GB" -ForegroundColor White
-Write-Host "  Minimum free required after test: $([math]::Round($minFreeBytes/1GB,2)) GB (20%)" -ForegroundColor White
-Write-Host "  Estimated required: $([math]::Round($requiredSpace/1GB,2)) GB (including 10% safety margin)" -ForegroundColor White
+if ($freeSpace -ne $null -and $totalDisk -ne $null) {
+    Write-Host
+    Write-Host "Disk space check:" -ForegroundColor Yellow
+    Write-Host "  Total disk: $([math]::Round($totalDisk/1GB,2)) GB" -ForegroundColor White
+    Write-Host "  Available: $([math]::Round($freeSpace/1GB,2)) GB" -ForegroundColor White
+    Write-Host "  Minimum free required after test: $([math]::Round($minFreeBytes/1GB,2)) GB (20%)" -ForegroundColor White
+    Write-Host "  Estimated required: $([math]::Round($requiredSpace/1GB,2)) GB (including 10% safety margin)" -ForegroundColor White
+    Write-Host
+}
 
-# Auto-scale if needed
-if (($freeSpace - $requiredSpace) -lt $minFreeBytes) {
-    Write-Host "\nWARNING: Not enough disk space for the requested test set! Attempting to auto-scale..." -ForegroundColor Red
-    # Calculate max allowed bytes for test data
-    $maxAllowedBytes = $freeSpace - $minFreeBytes
-    if ($maxAllowedBytes -le 0) {
-        Write-Host "ERROR: Not enough disk space to generate any test data while leaving 20% free." -ForegroundColor Red
-        exit 1
+# Auto-scale if needed (for local disk or UNC with MaxSizeGB)
+if (($freeSpace -ne $null -and $totalDisk -ne $null) -or $maxAllowedBytes -ne $null) {
+    $limitBytes = $maxAllowedBytes
+    if ($freeSpace -ne $null -and $totalDisk -ne $null) {
+        $limitBytes = $freeSpace - $minFreeBytes
     }
-    # Estimate new total files
-    $avgFileSize = ($MaxFileSizeMB * 1024 * 1024 / 2)
-    $maxFiles = [math]::Floor($maxAllowedBytes / ($avgFileSize * (1 + $safetyMargin)))
-    if ($maxFiles -lt 1) {
-        Write-Host "ERROR: Not enough disk space to generate even a single file." -ForegroundColor Red
-        exit 1
-    }
-    # Adjust FolderCount and/or MaxFiles to fit
-    $origFolderCount = $FolderCount
-    $origMaxFiles = $MaxFiles
-    if ($maxFiles -lt ($FolderCount * $MinFiles)) {
-        # Not enough for MinFiles per folder, reduce FolderCount
-        $FolderCount = [math]::Max([math]::Floor($maxFiles / $MinFiles), 1)
-        $MaxFiles = $MinFiles
-    } else {
-        $MaxFiles = [math]::Max([math]::Floor($maxFiles / $FolderCount), $MinFiles)
-    }
-    Write-Host "Auto-scaled parameters:" -ForegroundColor Yellow
-    Write-Host "  FolderCount: $FolderCount (was $origFolderCount)" -ForegroundColor White
-    Write-Host "  MaxFiles: $MaxFiles (was $origMaxFiles)" -ForegroundColor White
-    $estimatedTotalFiles = $FolderCount * [math]::Round(($MinFiles + $MaxFiles) / 2)
-    $estimatedTotalBytes = $estimatedTotalFiles * $avgFileSize
-    $requiredSpace = $estimatedTotalBytes * (1 + $safetyMargin)
-    Write-Host "  New estimated required: $([math]::Round($requiredSpace/1GB,2)) GB" -ForegroundColor White
-    if (($freeSpace - $requiredSpace) -lt $minFreeBytes) {
-        Write-Host "ERROR: Even after auto-scaling, not enough disk space to leave 20% free." -ForegroundColor Red
-        exit 1
+    if ($limitBytes -ne $null -and ($limitBytes - $requiredSpace) -lt 0) {
+        Write-Host
+        if ($maxAllowedBytes -ne $null) {
+            Write-Host "Requested test set exceeds -MaxSizeGB cap. Auto-scaling to fit within specified limit..." -ForegroundColor Yellow
+        } else {
+            Write-Host "Not enough disk space for the requested test set! Attempting to auto-scale..." -ForegroundColor Red
+        }
+        $avgFileSize = ($MaxFileSizeMB * 1024 * 1024 / 2)
+        $maxFiles = [math]::Floor($limitBytes / ($avgFileSize * (1 + $safetyMargin)))
+        if ($maxFiles -lt 1) {
+            Write-Host "ERROR: Not enough space to generate even a single file under the specified constraints." -ForegroundColor Red
+            exit 1
+        }
+        $origFolderCount = $FolderCount
+        $origMaxFiles = $MaxFiles
+        if ($maxFiles -lt ($FolderCount * $MinFiles)) {
+            $FolderCount = [math]::Max([math]::Floor($maxFiles / $MinFiles), 1)
+            $MaxFiles = $MinFiles
+        } else {
+            $MaxFiles = [math]::Max([math]::Floor($maxFiles / $FolderCount), $MinFiles)
+        }
+        Write-Host "Auto-scaled parameters:" -ForegroundColor Yellow
+        Write-Host "  FolderCount: $FolderCount (was $origFolderCount)" -ForegroundColor White
+        Write-Host "  MaxFiles: $MaxFiles (was $origMaxFiles)" -ForegroundColor White
+        $estimatedTotalFiles = $FolderCount * [math]::Round(($MinFiles + $MaxFiles) / 2)
+        $estimatedTotalBytes = $estimatedTotalFiles * $avgFileSize
+        $requiredSpace = $estimatedTotalBytes * (1 + $safetyMargin)
+        Write-Host "  New estimated required: $([math]::Round($requiredSpace/1GB,2)) GB" -ForegroundColor White
+        if ($limitBytes - $requiredSpace -lt 0) {
+            Write-Host "ERROR: Even after auto-scaling, not enough space to fit under the specified cap." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host
     }
 }
 
@@ -174,6 +202,7 @@ for ($i = 0; $i -lt $FolderCount; $i++) {
 }
 
 Write-Host "Pre-generated $($AllFolderData.Count) folders with $TotalEstimatedFiles total files" -ForegroundColor Green
+Write-Host
 
 # Create optimized data buffers (reused across threads)
 # Pre-create buffer patterns to avoid repeated allocations
@@ -187,7 +216,7 @@ for ($p = 0; $p -lt 10; $p++) {
 }
 
 # ULTRA-OPTIMIZED: Process in larger batches with minimal overhead
-$BatchSize = 200  # Larger batches = less overhead
+$BatchSize = 50  # Larger batches = less overhead; smaller batches = faster progress updates
 $ProcessedFolders = 0
 $StartTime = Get-Date
 
@@ -195,6 +224,7 @@ $StartTime = Get-Date
 $FolderArray = $AllFolderData.ToArray()
 
 Write-Host "Starting parallel processing with optimized I/O..." -ForegroundColor Green
+Write-Host
 
 for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $BatchSize) {
     $batchEnd = [Math]::Min($batchStart + $BatchSize - 1, $FolderArray.Length - 1)
@@ -251,18 +281,18 @@ for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $Batch
         }
     } -ThrottleLimit $ThrottleLimit
     
-    # Progress reporting (less frequent for better performance)
+    # Progress reporting (more frequent for better feedback)
     $ProcessedFolders += ($batchEnd - $batchStart + 1)
     $ElapsedTime = (Get-Date) - $StartTime
     
-    if ($ProcessedFolders % 500 -eq 0 -or $ProcessedFolders -eq $FolderArray.Length) {
+    if ($ProcessedFolders % 50 -eq 0 -or $ProcessedFolders -eq $FolderArray.Length) {
         $FoldersPerSecond = [Math]::Round($ProcessedFolders / $ElapsedTime.TotalSeconds, 2)
         $EstimatedTotal = if ($ProcessedFolders -eq $FolderArray.Length) { 
             $ElapsedTime.TotalMinutes 
         } else { 
             [Math]::Round(($FolderArray.Length / $ProcessedFolders) * $ElapsedTime.TotalMinutes, 1) 
         }
-        Write-Host "Processed $ProcessedFolders/$($FolderArray.Length) folders ($FoldersPerSecond/sec, ${EstimatedTotal}min total)" -ForegroundColor Cyan
+        Write-Host "Status: Processed $ProcessedFolders/$($FolderArray.Length) folders ($FoldersPerSecond/sec, est. ${EstimatedTotal} min total)" -ForegroundColor Cyan
     }
 }
 
@@ -270,16 +300,18 @@ for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $Batch
 $EndTime = Get-Date
 $TotalTime = $EndTime - $StartTime
 
-Write-Host "`n=== ULTRA-HIGH-PERFORMANCE GENERATION COMPLETE ===" -ForegroundColor Green
+Write-Host
+Write-Host "=== ULTRA-HIGH-PERFORMANCE GENERATION COMPLETE ===" -ForegroundColor Green
 Write-Host "Created: $FolderCount folders" -ForegroundColor White
 Write-Host "Created: $TotalEstimatedFiles files" -ForegroundColor White
 Write-Host "Total time: $($TotalTime.ToString('mm\:ss\.ff'))" -ForegroundColor White
 Write-Host "Average: $([Math]::Round($FolderCount / $TotalTime.TotalSeconds, 2)) folders/second" -ForegroundColor White
 Write-Host "File rate: $([Math]::Round($TotalEstimatedFiles / $TotalTime.TotalSeconds, 0)) files/second" -ForegroundColor White
 Write-Host "Location: $RootPath" -ForegroundColor Yellow
+Write-Host
 
 # Quick verification (using .NET for speed)
-Write-Host "`nQuick verification:" -ForegroundColor Yellow
+Write-Host "Quick verification:" -ForegroundColor Yellow
 $actualFolders = [System.IO.Directory]::GetDirectories($RootPath).Length
 $sampleFolder = [System.IO.Directory]::GetDirectories($RootPath) | Select-Object -First 1
 $sampleFiles = if ($sampleFolder) { [System.IO.Directory]::GetFiles($sampleFolder).Length } else { 0 }

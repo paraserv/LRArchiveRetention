@@ -54,52 +54,75 @@
 #>
 
 # Script Parameters
-[CmdletBinding(DefaultParameterSetName='Help')]
-param (
-    [Parameter(Mandatory=$true,
-        Position=0,
-        ParameterSetName='Execute',
-        HelpMessage="Path to archive directory that needs to be processed")]
+[CmdletBinding(DefaultParameterSetName='Execute')]
+param(
+    # --- Parameter Set: Execute for file processing ---
+    [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'Execute', HelpMessage = "Path to the archive directory to process.")]
+    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "UNC path to the network share for the credential.")]
     [string]$ArchivePath,
-    
-    [Parameter(Mandatory=$true,
-        Position=1,
-        ParameterSetName='Execute',
-        HelpMessage="Number of days to retain files. Files older than this will be processed")]
-    [ValidateRange(1,3650)]
+
+    [Parameter(Mandatory = $true, Position = 1, ParameterSetName = 'Execute', HelpMessage = "Number of days to retain files.")]
+    [ValidateRange(1, 3650)]
     [int]$RetentionDays,
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Add -Execute to actually delete/move files. Without this, script runs in dry-run mode")]
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "A unique name to identify the saved credential.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "The name of the saved credential to use for network access.")]
+    [string]$CredentialTarget,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Actually perform file operations. Default is a dry-run.")]
     [switch]$Execute,
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Path to log file")]
+
+    # --- Parameter Set: Save a new credential ---
+    [Parameter(Mandatory = $true, ParameterSetName = 'SaveCredential', HelpMessage = "Switch to save a new credential.")]
+    [switch]$SaveCredential,
+
+    # --- Common Parameters for Execution ---
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Path to the log file.")]
     [string]$LogPath,
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Maximum number of retries for failed operations")]
-    [ValidateRange(0,10)]
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Maximum number of retries for failed operations.")]
+    [ValidateRange(0, 10)]
     [int]$MaxRetries = 3,
-    
-    [Parameter(Mandatory=$false,
-        ParameterSetName='Execute',
-        HelpMessage="Delay in seconds between retry attempts")]
-    [ValidateRange(1,300)]
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Delay in seconds between retry attempts.")]
+    [ValidateRange(1, 300)]
     [int]$RetryDelaySeconds = 1,
-    
-    [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="Skip empty directory cleanup after file processing")]
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "Skip empty directory cleanup after file processing.")]
     [switch]$SkipDirCleanup,
-    
-    [Parameter(Mandatory=$false, ParameterSetName='Execute', HelpMessage="File types to include (default: .lca)")]
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'Execute', HelpMessage = "File types to include (e.g., '.lca').")]
     [string[]]$IncludeFileTypes = @('.lca'),
-    
-    [Parameter(ParameterSetName='Help')]
+
+    # --- Help Parameter ---
+    [Parameter(ParameterSetName = 'Help')]
     [switch]$Help
 )
+
+# Import credential helper module
+try {
+    # Assuming the module is in a 'modules' directory relative to the script
+    $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'modules/ShareCredentialHelper.psm1'
+    Import-Module -Name $modulePath -Force
+}
+catch {
+    Write-Error "Failed to import ShareCredentialHelper module from '$modulePath'. Ensure it is in the 'modules' subdirectory. Error: $($_.Exception.Message)"
+    exit 1
+}
+
+# Handle SaveCredential action and exit
+if ($PSCmdlet.ParameterSetName -eq 'SaveCredential') {
+    try {
+        Write-Host "Saving credential for target '$CredentialTarget'..." -ForegroundColor Yellow
+        Save-ShareCredential -Target $CredentialTarget -SharePath $ArchivePath
+        Write-Host "Credential saved successfully for target '$CredentialTarget'." -ForegroundColor Green
+        exit 0
+    }
+    catch {
+        Write-Error "Failed to save credential: $($_.Exception.Message)"
+        exit 1
+    }
+}
 
 # Script version (single source of truth)
 $SCRIPT_VERSION = '1.0.13'
@@ -122,6 +145,39 @@ $ErrorActionPreference = 'Stop'  # Make errors terminating by default
 
 # Set script start time for accurate timing in summary (local time only)
 $script:startTime = Get-Date
+
+# --- Start of Script ---
+
+$tempDriveName = $null
+$originalArchivePath = $ArchivePath
+
+# Handle network credentials if a target is specified
+if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
+    Write-Log "CredentialTarget '$CredentialTarget' specified. Attempting to map network drive." -Level INFO
+    try {
+        $credential = Get-ShareCredential -Target $CredentialTarget
+        if ($null -eq $credential) {
+            throw "Credential with target '$CredentialTarget' not found. Please save it first using the -SaveCredential switch."
+        }
+
+        # Create a temporary PSDrive
+        $tempDriveName = "archive_$(Get-Random -Minimum 1000 -Maximum 9999)"
+        Write-Log "Creating temporary PSDrive '$tempDriveName' for path '$($credential.SharePath)'..." -Level DEBUG
+        
+        # Suppress the output of New-PSDrive and capture potential errors
+        $drive = New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $credential.SharePath -Credential $credential -ErrorAction Stop
+        
+        # Update ArchivePath to use the new drive
+        $ArchivePath = "$tempDriveName`:\"
+        Write-Log "Successfully mapped '$($credential.SharePath)' to '$ArchivePath'." -Level INFO
+
+    } catch {
+        $errorMsg = "Failed to establish connection to network share using credential '$CredentialTarget'. Error: $($_.Exception.Message)"
+        Write-Log $errorMsg -Level FATAL
+        Complete-ScriptExecution -Success $false -Message $errorMsg
+        exit 1
+    }
+}
 
 # Set up script log directory
 $scriptLogsDir = Join-Path -Path $PSScriptRoot -ChildPath "script_logs"
@@ -1225,6 +1281,12 @@ catch {
 }
 finally {
     # Cleanup
+    # Clean up temporary PSDrive if it was created
+    if ($null -ne $tempDriveName -and (Get-PSDrive $tempDriveName -ErrorAction SilentlyContinue)) {
+        Write-Log "Removing temporary PSDrive '$tempDriveName'..." -Level DEBUG
+        Remove-PSDrive -Name $tempDriveName -Force -ErrorAction SilentlyContinue
+    }
+
     if (-not $script:completed) {
         Complete-ScriptExecution -Success $true
     }
