@@ -1,5 +1,14 @@
 # test-plan.md
 
+> **For detailed step-by-step instructions on running and validating these tests, see `readme-test-automation.md`.**
+
+## Quick Workflow Checklist
+1. **Generate test data on the server** using `GenerateTestData.ps1` (see below).
+2. **Run all core and edge-case tests** using `RunArchiveRetentionTests.sh` from your Mac/Linux.
+3. **Validate logs and interpret results** using SSH and log commands (required).
+
+---
+
 ## Test Data Generation (Prerequisite)
 
 Before running core tests, generate realistic test data using `GenerateTestData.ps1`:
@@ -9,7 +18,8 @@ scp -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR tests
 ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR administrator@10.20.1.200 \
   "pwsh -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:/LogRhythm/Scripts/ArchiveV2/tests'; ./GenerateTestData.ps1 -RootPath 'D:/LogRhythmArchives/Test' }\""
 ```
-- This script auto-scales the test data set and is required before running core tests.
+- This script will create a realistic, auto-scaled test data set in `D:/LogRhythmArchives/Test`.
+- **You must run this before running the core tests.**
 - Output will summarize the number of files/folders created.
 
 ---
@@ -26,6 +36,53 @@ bash RunArchiveRetentionTests.sh
 - Output for each test is printed, including warnings, errors, and summary.
 - To add more scenarios, edit the script and add more `run_test` calls.
 - After each run, review the output and logs for validation.
+
+---
+
+## Validating and Interpreting Results (REQUIRED)
+- Review the output for pass/fail and compare to the expected results below.
+- Check logs on the server for detailed audit/compliance info.
+- Update the test tracking table at the end of this file after each run.
+- Use SSH to view logs:
+  ```bash
+  ssh -i ~/.ssh/id_rsa_windows -o StrictHostKeyChecking=no -o LogLevel=ERROR administrator@10.20.1.200 \
+    'powershell -Command "Get-Content -Tail 20 ''C:\LogRhythm\Scripts\ArchiveV2\script_logs\ArchiveRetention.log''"'
+  ```
+- Adjust the log path as needed.
+
+---
+
+## Troubleshooting
+- **For operational issues, troubleshooting steps, and FAQs, see `readme-test-automation.md`.**
+- **SSH connection fails:**
+  - Check your SSH key path and permissions.
+  - Ensure the server is reachable and the user has access.
+- **Not enough disk space:**
+  - The data generator will auto-scale, but ensure at least 20% free disk space.
+- **PowerShell errors:**
+  - Make sure PowerShell 5.1+ or 7+ is installed and in the PATH.
+- **Permission denied on server:**
+  - Ensure your user has write/delete permissions in the test data directory.
+- **Test data not generated:**
+  - Always run `GenerateTestData.ps1` before running tests. If missing, re-run the generator.
+- **Test script errors:**
+  - Check for typos in script names or paths. Ensure all scripts are up to date and in the correct folder.
+
+---
+
+## FAQ
+- **Q: What if I want to reset the test data?**
+  - A: Re-run `GenerateTestData.ps1` to regenerate a fresh test set. This will overwrite the previous data.
+- **Q: What if a test fails?**
+  - A: Review the output and logs for errors. Check the troubleshooting section above. If needed, regenerate test data and re-run.
+- **Q: Can I add my own test scenarios?**
+  - A: Yes! Edit `RunArchiveRetentionTests.sh` and add more `run_test` calls. See below for ideas.
+- **Q: How do I check detailed logs?**
+  - A: Use the SSH log command above, or open the log files directly on the server.
+- **Q: What if the script output is unclear?**
+  - A: Compare the output to the expected results below. If still unclear, check the logs or ask for help.
+- **Q: How do I update the test tracking table?**
+  - A: Edit this file and fill in the Pass/Fail and Notes columns after each run.
 
 ---
 
