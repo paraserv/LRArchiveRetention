@@ -24,6 +24,8 @@
     The number of parallel threads to use (default: 2x CPU count).
 .PARAMETER MaxSizeGB
     The maximum total size (in GB) of all generated test data. If set, the script will auto-scale down the number of folders/files to not exceed this cap. Especially useful for UNC/NAS paths where disk space checks are not possible.
+.PARAMETER CredentialTarget
+    Name of saved network share credential (created with Save-Credential.ps1)
 .EXAMPLE
     .\Generate-TestData.ps1 -RootPath 'D:\LogRhythmArchives\Test' -FolderCount 5000 -MinFiles 20 -MaxFiles 500 -MaxFileSizeMB 10
     # Attempts to create 5000 folders with 20-500 files each, but will auto-scale down if disk space is insufficient to leave 20% free.
@@ -41,14 +43,53 @@ param(
     [int]$MaxFiles = 500,
     [int]$MaxFileSizeMB = 10,
     [int]$ThrottleLimit = [Environment]::ProcessorCount * 2,  # Auto-detect optimal parallelism
-    [double]$MaxSizeGB = $null  # Optional: hard cap for total generated data (UNC-safe)
+    [double]$MaxSizeGB = $null,  # Optional: hard cap for total generated data (UNC-safe)
+    [Parameter(Mandatory=$false, HelpMessage="Name of saved network share credential (created with Save-Credential.ps1)")]
+    [string]$CredentialTarget
 )
+
+$tempDriveName = $null
 
 # Require PowerShell 7+ for -Parallel
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
     Write-Host "ERROR: This script requires PowerShell 7+ (Core) for parallel file generation." -ForegroundColor Red
     Write-Host "Please install PowerShell 7+ from https://github.com/PowerShell/PowerShell and run this script with 'pwsh'." -ForegroundColor Yellow
     exit 1
+}
+
+# Immediately after PowerShell version check, import credential module and map drive if CredentialTarget specified
+
+# --- Optional Network Share Authentication ---
+if (-not [string]::IsNullOrWhiteSpace($CredentialTarget)) {
+    Write-Host "CredentialTarget '$CredentialTarget' specified. Attempting to authenticate to network share..." -ForegroundColor Cyan
+    try {
+        # Import helper module (relative to script root)
+        $modulePath = Join-Path -Path $PSScriptRoot -ChildPath '../modules/ShareCredentialHelper.psm1'
+        Import-Module -Name $modulePath -Force
+
+        $credentialInfo = Get-ShareCredential -Target $CredentialTarget
+
+        if ($null -eq $credentialInfo) {
+            throw "Failed to load stored credential for target '$CredentialTarget'. Run Save-Credential.ps1 first."
+        }
+
+        # Use a fixed temporary PSDrive name to establish the session authentication
+        $tempDriveName = 'GenDataMount'
+        if (Get-PSDrive -Name $tempDriveName -ErrorAction SilentlyContinue) {
+            Remove-PSDrive -Name $tempDriveName -Force -ErrorAction SilentlyContinue
+        }
+
+        New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $credentialInfo.SharePath -Credential $credentialInfo.Credential -ErrorAction Stop | Out-Null
+
+        # Ensure RootPath aligns with the share path from credential (allows overriding default)
+        $RootPath = $credentialInfo.SharePath
+
+        Write-Host "Successfully authenticated and connected to $RootPath using stored credentials." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "ERROR: $_" -ForegroundColor Red
+        exit 2
+    }
 }
 
 # Performance optimizations
@@ -317,3 +358,13 @@ $sampleFolder = [System.IO.Directory]::GetDirectories($RootPath) | Select-Object
 $sampleFiles = if ($sampleFolder) { [System.IO.Directory]::GetFiles($sampleFolder).Length } else { 0 }
 Write-Host "  Actual folders created: $actualFolders" -ForegroundColor Gray
 Write-Host "  Sample folder files: $sampleFiles" -ForegroundColor Gray
+
+# Cleanup temporary PSDrive if created
+if ($tempDriveName -and (Get-PSDrive -Name $tempDriveName -ErrorAction SilentlyContinue)) {
+    try {
+        Remove-PSDrive -Name $tempDriveName -Force -ErrorAction Stop
+        Write-Host "Removed temporary PSDrive '$tempDriveName'" -ForegroundColor DarkGray
+    } catch {
+        Write-Host "WARNING: Unable to remove temporary PSDrive '$tempDriveName' - $_" -ForegroundColor Yellow
+    }
+}
