@@ -117,6 +117,7 @@ This design provides several benefits:
 - **Convenience**: No need to remember or type UNC paths repeatedly
 - **Automation-friendly**: Perfect for scheduled tasks - no paths or credentials in scripts
 - **Flexibility**: Can use meaningful names instead of IP addresses
+- **More Info**: See [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md)
 
 ## Parameters
 
@@ -131,8 +132,6 @@ This design provides several benefits:
 -   `-RetryDelaySeconds` (int): Delay in seconds between retries (default: 1).
 -   `-SkipEmptyDirCleanup` (switch): Skips removing empty directories after processing.
 -   `-IncludeFileTypes` (string[]): File extensions to include (default: `@('.lca')`).
-
-
 
 ## Best Practices
 
@@ -205,17 +204,9 @@ For more technical details, see the [Cross-Platform Credential Storage Implement
    - The script will never delete files newer than 90 days, regardless of the value you specify with `-Execute`.
    - Dry-run will show what would be deleted for any value, but will warn if below 90.
 
-- **Access Denied**: Ensure the script runs with appropriate permissions
-- **No files processed**: Verify the `-ArchivePath` is correct and contains `.lca` files
-- **Unexpected deletions**: Always test without the `-Execute` flag and with `-Verbose` first to review actions
-- **Log file issues**: Check disk space and permissions for the log directory
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-**Disclaimer:**  
-This script is provided "as is", without warranty of any kind. Use at your own risk.
 
 ## Support
 
@@ -236,4 +227,3 @@ The script generates several types of log files for auditing, troubleshooting, a
 | `script_logs/ArchiveRetention_*.log`      | Rotated/archived main logs (previous runs): when the main log exceeds 10MB, it is archived with a timestamped filename. Preserves historical logs for compliance and troubleshooting. |
 | `retention_actions/retention_*.log`       | Retention action/audit logs: in execute mode, every file deleted is recorded here for compliance, audit trails, and forensic review. |
 
-**Best Practice:** Regularly back up all script logs for compliance, auditing, and troubleshooting.
