@@ -251,7 +251,7 @@ catch {
 }
 
 # Script version (single source of truth)
-$SCRIPT_VERSION = '1.0.14'
+$SCRIPT_VERSION = '1.1.0'
 
 # Show help if no parameters are provided or -Help is used
 if ($Help -or $MyInvocation.BoundParameters.Count -eq 0) {

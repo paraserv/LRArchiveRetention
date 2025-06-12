@@ -1,0 +1,32 @@
+---
+description: "Common connectivity issues and troubleshooting guidance for SSH and Windows connections"
+globs: 
+alwaysApply: false
+---
+# Troubleshooting Guide
+
+## Connectivity Checks
+1. `ping 10.20.1.200`
+2. `nc -zv -w 1 10.20.1.200 22`
+3. `ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'hostname'`
+4. `chmod 600 ~/.ssh/id_rsa_windows`
+
+## Quick IP Check
+```bash
+ipconfig | findstr /C:"IPv4 Address"
+```
+
+## Common Errors
+| Error | Tip |
+|-------|-----|
+| Ampersand not allowed | Fix quoting |
+| Unexpected token | Check for unescaped special characters |
+| Cannot bind parameter | Verify parameter names/values |
+
+## Credential Issues
+1. Ensure credentials were saved with **`-UseStdin`** (never -Password / env var).
+   ```powershell
+   echo "<password>" | .\Save-Credential.ps1 -Target "NAS" -SharePath "\\10.20.1.7\LRArchives" -UseStdin -Quiet
+   ```
+2. Confirm the target name matches `-CredentialTarget`.
+3. Verify `svc_lrarchive` (or specified user) has access to share.

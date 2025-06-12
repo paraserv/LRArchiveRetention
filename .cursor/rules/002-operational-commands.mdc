@@ -1,0 +1,63 @@
+---
+description: Running, executing, copying, testing scripts
+globs: 
+alwaysApply: false
+---
+# ⭐ QUICK QUOTING & ESCAPING CHEAT-SHEET ⭐
+When running PowerShell through SSH:
+
+1. **Outer SSH string** → single-quoted.
+   ```bash
+   ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 \
+     'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { … }"'
+   ```
+2. **Inside that string**:
+   • Start the PowerShell block with double quotes immediately after `-Command`.
+   • Use **doubled single quotes** (`''`) for any nested single quotes.
+   • UNC paths stay exactly `\\server\share` (no extra escaping).
+3. **Quick sanity test**
+   ```bash
+   ssh … 'powershell -NoProfile -Command "& { Write-Host ''OK'' }"'
+   ```
+
+---
+
+# Script Commands
+
+- **Copy Script to Server**: 
+  ```
+  scp -i ~/.ssh/id_rsa_windows ArchiveRetention.ps1 administrator@10.20.1.200:'C:/LogRhythm/Scripts/ArchiveV2/'
+  ```
+- **Dry Run (Test)**:
+  ```
+  ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\\LogRhythm\\Scripts\\ArchiveV2''; .\\ArchiveRetention.ps1 -ArchivePath ''D:\\LogRhythmArchives\\InactiveTest'' -RetentionDays 20 -Verbose }"'
+  ```
+- **Execute (Live)**:
+  ```
+  ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\\LogRhythm\\Scripts\\ArchiveV2''; .\\ArchiveRetention.ps1 -ArchivePath ''D:\\LogRhythmArchives\\InactiveTest'' -RetentionDays 20 -Execute -Verbose }"'
+  ```
+
+# Common Tasks
+
+- **List Oldest Files on Server**:
+  ```
+  ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -Command "Get-ChildItem -Path ''D:\\LogRhythmArchives\\InactiveTest'' -Recurse -File | Sort-Object LastWriteTime | Select-Object -First 5 FullName, LastWriteTime, @{Name=''DaysOld'';Expression={[math]::Round(((Get-Date) - $_.LastWriteTime).TotalDays, 2)}} | Format-Table -AutoSize"'
+  ```
+- **View Remote Logs**:
+  ```
+  ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 'powershell -Command "Get-Content -Tail 20 ''C:\\LogRhythm\\Scripts\\ArchiveV2\\ArchiveRetention.log''"'
+  ```
+
+# Network Share Credentials (SECURE)
+**Step 1 – Save credentials (one-time per share):**
+```bash
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 \
+  "echo '<password>' | powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { cd 'C:\\LogRhythm\\Scripts\\ArchiveV2'; .\\Save-Credential.ps1 -Target 'NAS' -SharePath '\\\\10.20.1.7\\LRArchives' -UseStdin -Quiet }\""
+```
+* `svc_lrarchive` is used by default – override with `-UserName` if needed.*
+
+**Step 2 – Use the saved target in ArchiveRetention:**
+```bash
+ssh -i ~/.ssh/id_rsa_windows administrator@10.20.1.200 \
+  'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { cd ''C:\LogRhythm\Scripts\ArchiveV2''; .\ArchiveRetention.ps1 -CredentialTarget ''NAS'' -RetentionDays 180 -Execute }"'
+```

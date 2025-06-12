@@ -1,0 +1,31 @@
+---
+description: "Core project context with server information, development workflow, and safety guidance"
+globs: 
+alwaysApply: true
+---
+# Project Context
+- **Purpose**: Development of LogRhythm ArchiveRetention PowerShell script.
+- **Development Platform**: macOS (development) → Windows Server (testing via SSH).
+- **Target Platform**: Windows Server (end-users run scripts locally).
+- **Development Workflow**: Edit on Mac, copy via SCP, test via SSH, publish for Windows users.
+- **Critical Safety**: Always dry-run first during development - data deletion is irreversible.
+
+# Remote Windows Server Configuration
+- **IP Address**: `10.20.1.200`
+- **SSH Username**: `administrator`
+- **SSH Key Path**: `~/.ssh/id_rsa_windows`
+- **Default Script Path**: `C:/LogRhythm/Scripts/ArchiveV2/`
+
+# Default Network Resources
+- **Network Share (default)**: `\\10.20.1.7\LRArchives`
+- **Service Account (default)**: `svc_lrarchive` (generic account – not necessarily a Windows domain user)
+
+# Credential Handling (SECURE ONLY)
+- Always save credentials using `Save-Credential.ps1` with **`-UseStdin`** to avoid plain-text or environment variables.
+- Example secure command (run **on the Windows server**):
+  ```powershell
+  echo "<password>" | .\Save-Credential.ps1 -Target "NAS" -SharePath "\\10.20.1.7\LRArchives" -UseStdin -Quiet
+  ```
+- Never use `-Password` or `ARCHIVE_PASSWORD` in production.
+
+> **UNC path reminder**: `Save-Credential.ps1` validates `-SharePath` with a regex expecting exactly one pair of leading backslashes (e.g. `\\server\share`). Do **not** double-escape inside the script itself; only add extra escaping when embedding inside another quoted string (see 002-operational-commands cheat-sheet).

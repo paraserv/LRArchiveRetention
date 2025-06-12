@@ -2,9 +2,27 @@
 
 > **Versioning Note:** The authoritative version is defined in `ArchiveRetention.ps1` (`$SCRIPT_VERSION`).
 
+## Table of Contents
+- [Disclaimer](#disclaimer)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Credential Management](#credential-management)
+- [Parameters](#parameters)
+- [Best Practices](#best-practices)
+- [Testing & Validation](#testing--validation)
+- [Troubleshooting](#troubleshooting)
+- [Logging](#logging)
+- [License](#license)
+- [Support](#support)
+- [Author](#author)
+
+---
+
 ## Disclaimer
 
-**Use at your own risk.** This retention script is designed to delete specific files in high-volume according to the execution parameters you provide. You are solely responsible for ensuring you have good backups and thoroughly testing and validating this script, and your chosen parameters, in a non-production environment before any production use. Whether due to misconfiguration (such as setting an overly aggressive retention period) or if there are any bugs in the script, the risk of data loss or unintended deletions is entirely yours. The authors and contributors are not liable for any damages, data loss, or other consequences resulting from the use or misuse of this script.
+**Use at your own risk.** This script deletes files according to your parameters. Ensure you have backups and test thoroughly in a non-production environment before production use. The authors are not liable for any data loss or damages.
 
 ---
 
@@ -24,7 +42,7 @@ This script is specifically designed for use with LogRhythm (LR7 SIEM) environme
 
 - Windows Server
 - PowerShell 5.1 or later
-- Appropriate permissions on LogRhythm archive directories (whether local or via a UNC share)
+- Sufficient permissions on archive directories (local or UNC share)
 
 ## Installation
 
@@ -38,171 +56,121 @@ This script is specifically designed for use with LogRhythm (LR7 SIEM) environme
 # Show help and available parameters
 .\ArchiveRetention.ps1 -Help
 
-# Dry run (shows a summary of what would be deleted with 90 day retention; if you want to list all files, add -Verbose)
+# Dry run for a local path (shows what would be deleted)
 .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 90
 
-# Actual execution (deletes files) with -Execute parameter
+# Live execution for a local path (deletes files)
 .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 90 -Execute
 
-# Example output from dry run:
-# Found 6,484 files (2.3 GB) that would be processed (older than 90 days)
-# Oldest file: 20250303_1_1_1_638765599202720081.lca (Last modified: 03/03/2025)
-# Newest file: 20250314_1_1_1_638775155530957788.lca (Last modified: 03/14/2025)
-
-# Process a specific archive directory for 3 years
-.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 1095 -Execute
-
-# Process with custom log location
-.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives" -RetentionDays 365 -LogPath "C:\Logs\archive_retention.log" -Execute
-
-### Dry Run on a Local Path
-
-This command shows what files would be deleted from a local directory. No files are actually changed.
-
-```powershell
-.\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 90
+# Live execution for a network share using a saved credential
+.\ArchiveRetention.ps1 -CredentialTarget "NAS_CRED" -RetentionDays 180 -Execute
 ```
 
-### Execute Deletion on a Local Path
+> **Note:** The script will never delete files newer than the minimum retention (default: 90 days), even if you specify a lower value with `-Execute`.
 
-This command will actually delete the files. Use with caution.
+## Credential Management
 
+For network shares, use a secure two-step process:
+
+**Step 1: Save Credentials (One-Time Setup)**
+Use the included `Save-Credential.ps1` helper script. It will test the credentials against the share before saving.
+
+*   **Interactive Method (Prompt for password):**
+    ```powershell
+    # Save credentials for a network share, prompting for username/password
+    .\Save-Credential.ps1 -Target "NAS_CRED" -SharePath "\\10.20.1.7\LRArchives"
+    ```
+*   **Secure Non-Interactive Method (Recommended for automation):**
+    ```powershell
+    # Pipe the password to the script to avoid storing it in history or process lists
+    echo "YourSecurePassword" | .\Save-Credential.ps1 -Target "NAS_CRED" -SharePath "\\10.20.1.7\LRArchives" -UseStdin -Quiet
+    ```
+
+**Step 2: Use Saved Credential**
+Reference the credential by the `-Target` name you chose. The script will automatically handle mapping the network drive.
 ```powershell
-.\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 365 -Execute
-```
-
-### Using Network Shares (UNC Paths)
-
-Accessing network shares requires a two-step process to ensure credentials are handled securely.
-
-**Step 1: Save the Credential (One-Time Setup)**
-
-Use the `Save-Credential.ps1` script to securely store credentials for a network share:
-
-```powershell
-# Save credentials for a network share (-Target is the name/label of the credential)
-.\Save-Credential.ps1 -Target "10.20.1.7" -SharePath "\\10.20.1.7\LRArchives"
-# You'll be prompted for username and password
-```
-
-**Important:** The credential system stores both:
-- The network share path (e.g., `\\10.20.1.7\LRArchives`)
-- The username and password for accessing it
-
-You can use any name as the target - it's just an identifier. For example:
-- `-Target "10.20.1.7"` (using IP address)
-- `-Target "LR_NAS"` (using a friendly name)
-- `-Target "Archive_Server"` (descriptive name)
-
-**Step 2: Run the Script Using the Saved Credential**
-
-When running the archive retention script, you only need to specify the credential target name:
-
-```powershell
-# Use the saved credential (no need to specify the share path)
-.\ArchiveRetention.ps1 -CredentialTarget "10.20.1.7" -RetentionDays 180
+# Use the saved credential (no need to specify the share path again)
+.\ArchiveRetention.ps1 -CredentialTarget "NAS_CRED" -RetentionDays 180
 
 # With execution
-.\ArchiveRetention.ps1 -CredentialTarget "10.20.1.7" -RetentionDays 180 -Execute
+.\ArchiveRetention.ps1 -CredentialTarget "NAS_CRED" -RetentionDays 180 -Execute
 ```
 
-The script automatically:
-1. Retrieves the stored credentials for the target
-2. Gets the share path from the credential store
-3. Maps the network share using those credentials
-4. Processes files at that location
-
-This design provides several benefits:
-- **Security**: Credentials are encrypted and stored securely
-- **Convenience**: No need to remember or type UNC paths repeatedly
-- **Automation-friendly**: Perfect for scheduled tasks - no paths or credentials in scripts
-- **Flexibility**: Can use meaningful names instead of IP addresses
-- **More Info**: See [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md)
+**Security Notes:**
+- Credentials are encrypted using the Windows Data Protection API (DPAPI) and stored securely on the machine where they were created.
+- Never hard-code passwords in scripts. Always use the `-UseStdin` parameter or interactive prompts.
 
 ## Parameters
 
-### For Processing Files
-
--   `-ArchivePath` (string, mandatory): Path to the local directory or network share to process.
--   `-RetentionDays` (int, mandatory): Number of days to retain files. Files older than this will be deleted.
--   `-Execute` (switch): Performs the deletion. Without this, the script runs in a dry-run mode.
--   `-CredentialTarget` (string): The name of a saved credential to use for accessing a network share.
--   `-LogPath` (string): Path to the log file. Defaults to a `script_logs` folder.
--   `-MaxRetries` (int): Maximum number of retries for failed deletions (default: 3).
--   `-RetryDelaySeconds` (int): Delay in seconds between retries (default: 1).
--   `-SkipEmptyDirCleanup` (switch): Skips removing empty directories after processing.
--   `-IncludeFileTypes` (string[]): File extensions to include (default: `@('.lca')`).
+| Parameter              | Type         | Required | Description                                                                 |
+|------------------------|--------------|----------|-----------------------------------------------------------------------------|
+| `-ArchivePath`         | string       | Yes      | Path to local directory or network share. Not needed if using `-CredentialTarget`. |
+| `-CredentialTarget`    | string       | Yes      | Name of saved credential for network share. Not needed if using `-ArchivePath`. |
+| `-RetentionDays`       | int          | Yes      | Number of days to retain files.                                             |
+| `-Execute`             | switch       | No       | Actually deletes files. If omitted, the script runs in safe dry-run mode.   |
+| `-Verbose`             | switch       | No       | Enables detailed, step-by-step logging to the console during execution.     |
+| `-LogPath`             | string       | No       | Custom path to the script's log file (default: `script_logs` folder).       |
+| `-MaxRetries`          | int          | No       | Max retries for failed file deletions (default: 3).                         |
+| `-RetryDelaySeconds`   | int          | No       | Delay between deletion retries in seconds (default: 1).                     |
+| `-SkipDirCleanup`      | switch       | No       | Skips the final step of removing empty directories after file processing.   |
+| `-IncludeFileTypes`    | string[]     | No       | File extensions to include, e.g., `@('.lca', '.txt')` (default: `@('.lca')`).|
 
 ## Best Practices
 
 1. **Backup first**: Ensure you have backups before running with `-Execute`
-2. **Always test first**: Run without `-Execute` and with `-Verbose` to verify which files will be deleted
-3. **Start with a subset**: Test with smaller directories before running against a massive dataset
-4. **Review logs**: Check the main script log (`script_logs/ArchiveRetention.log`) after each run for any warnings or errors and if you ran with `-Execute` check the retention action logs (`retention_actions/retention_*.log`)
-5. **Schedule during off-peak**: Run during maintenance windows but not at the same time as other processes to minimize impact
-6. **Monitor progress**: The script provides real-time progress updates
-7. **Archive logs**: Regularly back up all script logs for compliance, auditing, and troubleshooting. This includes:
-   - The main script log (`script_logs/ArchiveRetention.log`)
-   - Previous main script logs (`script_logs/ArchiveRetention_*.log`)
-   - Retention action logs (`retention_actions/retention_*.log`)
-8. **Expect longer initial run times**: The first time you run the script (especially with `-Execute`), it may take significantly longer than subsequent runs, since it will likely have much more data to delete. Consider staging a few initial runs with larger retention days before getting to your target and setting up a scheduled task. Regular daily or weekly scheduled runs will typically be much faster.
-9. **Always use UNC paths for network shares**: Use paths like `\\server\share\folder` instead of mapped drives (e.g., `Z:`). Mapped drives are session-specific and may not be available in scheduled tasks, SSH, or service contexts.
-10. **Run as a user with appropriate permissions**: Ensure the account running the script has read/write access to the archive or network share. For UNC paths, verify permissions on the share and NTFS.
+2. **Test with dry-run**: Use dry-run and `-Verbose` to verify what will be deleted
+3. **Start small**: Test on a subset before running on large datasets
+4. **Review logs**: Check logs after each run for warnings or errors
+5. **Schedule wisely**: Run during maintenance windows, not during peak hours
+6. **Use UNC paths**: For network shares, always use UNC paths (e.g., `\\server\share`)
+7. **Run as appropriate user**: Ensure the script runs with sufficient permissions
 
-### Secure Credential Management
-The script uses a secure, two-part workflow for handling credentials for network shares, designed for reliability in automated environments.
+## Testing & Validation
 
-1.  **Interactive Setup (`Save-Credential.ps1`)**: A dedicated helper script is provided for the one-time, interactive saving of credentials. This script must be run in a full interactive Windows session (like RDP or a direct console login). It uses the standard `Get-Credential` prompt to securely capture the username and password.
-2.  **Non-Interactive Execution (`ArchiveRetention.ps1`)**: The main script is designed for non-interactive use (e.g., scheduled tasks, SSH sessions). It **never** prompts for a password. Instead, it uses credentials that have been previously saved with the helper script.
+> **Note:** This section is for end users. For developer and automated test plans, see the `/tests` directory.
 
-This separation of concerns ensures that passwords are never sent over non-interactive channels or stored in script files. The credentials themselves are stored on disk using AES-256 encryption with a machine-specific key, making them secure and portable across PowerShell versions.
-
-For more technical details, see the [Cross-Platform Credential Storage Implementation Guide](./cross-platform-credential-storage.md).
+**How to Safely Test the Script:**
+1. **Dry Run**:
+   - Run the script without `-Execute` to see what files would be deleted.
+   - Example:
+     ```powershell
+     .\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 90
+     ```
+   - Review the output and logs to confirm only the intended files are in scope.
+2. **Test with a Small Directory**:
+   - Use a test directory with sample files to validate behavior.
+   - Adjust `-RetentionDays` to test edge cases (e.g., files just above/below the threshold).
+3. **Check Logs**:
+   - Review `script_logs/ArchiveRetention.log` for a summary and any warnings/errors.
+   - In dry-run, no files are deleted; in execute mode, check `retention_actions/retention_*.log` for audit trail.
+4. **Validate Results**:
+   - After running with `-Execute`, verify that only files older than the retention period are deleted.
+   - Confirm no newer files or unintended files are affected.
+5. **Restore from Backup (if needed)**:
+   - Always ensure you can restore files from backup before running in production.
 
 ## Troubleshooting
 
-### Common Issues
+| Issue                        | Possible Causes & Solutions                                                                 |
+|------------------------------|------------------------------------------------------------------------------------------|
+| Access Denied                | Run as admin; check share and NTFS permissions; verify account context                    |
+| Files Not Being Deleted      | Files may not meet retention; check path and permissions; ensure files are not locked     |
+| Mapped Drives Not Available  | Use UNC paths; mapped drives are session-specific                                         |
+| File Not Found Errors        | Check for broken shortcuts, inaccessible subfolders, long paths, or special characters    |
+| 'Access is denied'           | Insufficient permissions; check both share and NTFS permissions                           |
+| Performance Issues           | Run during off-peak; ensure server/network can handle load                                |
+| Log File Growth              | Main log rotates at 10MB; archive/rotate retention logs as needed                        |
+| Minimum Retention Not Honored| Script enforces minimum retention in execute mode                                         |
 
-1. **Access Denied**
-   - Ensure the script is run with administrative privileges
-   - Verify the account has Full Control permissions on the archive directory or network share
-   - For UNC paths, check both share and NTFS permissions
-   - If running as a service, scheduled task, or via SSH, ensure the account context has access
+- For more details, see logs in `script_logs/` and `retention_actions/`.
 
-2. **Files Not Being Deleted**
-   - Check if the files are older than the specified retention period
-   - Verify the path is correct and accessible
-   - Ensure no other processes have the files locked
+## Logging
 
-3. **Mapped drives not available**
-   - Mapped drives (e.g., `Z:`) are only available in the session where they were created
-   - Use UNC paths for reliability, especially in scheduled tasks, SSH, or service contexts
-   - If you must use a mapped drive, map it at the start of the script using `net use` or `New-PSDrive`
-
-4. **'The system cannot find the file specified'**
-   - This may indicate a broken shortcut, inaccessible subfolder, or network hiccup
-   - Try running the script on subfolders to isolate the issue
-   - Check for long paths or special characters in file/folder names
-   - Review the main script log (`script_logs/ArchiveRetention.log`) for the full exception and stack trace
-
-5. **'Access is denied'**
-   - The user running the script does not have permissions to the share or folder
-   - Check both share and NTFS permissions
-   - If using a service account, ensure it is granted access
-
-6. **Performance Issues**
-   - For large directories, ensure the server and network can handle the load
-   - Avoid running during peak hours
-
-7. **Log File Growth**
-   - The main script log (`script_logs/ArchiveRetention.log`) automatically rotates when it reaches 10MB
-   - Previously ran script logs are saved as `script_logs/ArchiveRetention_*.log` (timestamped)
-   - Up to 10 rotated main script log files are kept by default
-   - Retention action/audit logs (`retention_actions/retention_*.log`) are not rotated by default and should be managed/archived as needed
-
-8. **Minimum retention not honored:**
-   - The script will never delete files newer than 90 days, regardless of the value you specify with `-Execute`.
-   - Dry-run will show what would be deleted for any value, but will warn if below 90.
+| Log File Location                        | Description                                                      |
+|-------------------------------------------|------------------------------------------------------------------|
+| `script_logs/ArchiveRetention.log`        | Main script log (current run): all activity, config, progress    |
+| `script_logs/ArchiveRetention_*.log`      | Rotated/archived main logs (previous runs, timestamped)          |
+| `retention_actions/retention_*.log`       | Audit logs: every file deleted in execute mode                   |
 
 ## License
 
@@ -216,14 +184,4 @@ Contributions are welcome! Please follow the standard GitHub fork and pull reque
 
 Nathan Church  
 Exabeam Professional Services
-
-## Logging
-
-The script generates several types of log files for auditing, troubleshooting, and compliance:
-
-| Log File Location                        | What It Contains                                 |
-|-------------------------------------------|--------------------------------------------------|
-| `script_logs/ArchiveRetention.log`        | Main script log (current run): all script activity, configuration, progress, warnings, errors, and summary information. Use this for troubleshooting and reviewing script runs. |
-| `script_logs/ArchiveRetention_*.log`      | Rotated/archived main logs (previous runs): when the main log exceeds 10MB, it is archived with a timestamped filename. Preserves historical logs for compliance and troubleshooting. |
-| `retention_actions/retention_*.log`       | Retention action/audit logs: in execute mode, every file deleted is recorded here for compliance, audit trails, and forensic review. |
 
