@@ -57,10 +57,10 @@ This script is specifically designed for use with LogRhythm (LR7 SIEM) environme
 .\ArchiveRetention.ps1 -Help
 
 # Dry run for a local path (shows what would be deleted)
-.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 90
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 90
 
 # Live execution for a local path (deletes files)
-.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\InactiveTest" -RetentionDays 90 -Execute
+.\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 90 -Execute
 
 # Live execution for a network share using a saved credential
 .\ArchiveRetention.ps1 -CredentialTarget "NAS_CRED" -RetentionDays 180 -Execute
@@ -134,7 +134,7 @@ Reference the credential by the `-Target` name you chose. The script will automa
    - Run the script without `-Execute` to see what files would be deleted.
    - Example:
      ```powershell
-     .\ArchiveRetention.ps1 -ArchivePath "D:\Logs\Inactive" -RetentionDays 90
+     .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 90
      ```
    - Review the output and logs to confirm only the intended files are in scope.
 2. **Test with a Small Directory**:
