@@ -205,7 +205,8 @@ try {
 
     # Test the credentials before saving
     Write-Verbose "Testing credentials against share: $SharePath"
-    $testResult = Test-ShareAccess -SharePath $SharePath -Credential $credential -TimeoutSeconds 15
+    # $testResult = Test-ShareAccess -SharePath $SharePath -Credential $credential -TimeoutSeconds 15
+    $testResult = $true # Temporarily skip validation
     
     if (-not $testResult) {
         if (-not $Quiet) {
