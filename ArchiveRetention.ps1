@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Archive or delete files older than a specified retention period.
+    Archive (delete) files older than a specified retention period.
 
 .DESCRIPTION
     This script processes files in a specified directory (including subdirectories) and deletes files that are older than the specified retention period.
