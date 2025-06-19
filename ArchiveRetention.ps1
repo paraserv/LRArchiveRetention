@@ -239,16 +239,8 @@ function Complete-ScriptExecution {
     }
 }
 
-# Import credential helper module
-try {
-    # Assuming the module is in a 'modules' directory relative to the script
-    $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'modules/ShareCredentialHelper.psm1'
-    Import-Module -Name $modulePath -Force
-}
-catch {
-    Write-Error "Failed to import ShareCredentialHelper module from '$modulePath'. Ensure it is in the 'modules' subdirectory. Error: $($_.Exception.Message)"
-    exit 1
-}
+# Import credential helper module (only when needed)
+# Module import moved to the credential handling section below
 
 # Script version (single source of truth)
 $SCRIPT_VERSION = '1.1.0'
@@ -300,6 +292,19 @@ $tempDriveName = $null
 
 # Handle network credentials if a target is specified
 if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
+    # Import credential helper module (only when using network credentials)
+    try {
+        $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'modules/ShareCredentialHelper.psm1'
+        Import-Module -Name $modulePath -Force
+        Write-Log "Imported ShareCredentialHelper module for network credentials." -Level DEBUG
+    }
+    catch {
+        $errorMsg = "Failed to import ShareCredentialHelper module from '$modulePath'. Ensure it is in the 'modules' subdirectory. Error: $($_.Exception.Message)"
+        Write-Log $errorMsg -Level FATAL
+        Write-Error $errorMsg
+        exit 1
+    }
+    
     Write-Log "CredentialTarget '$CredentialTarget' specified. Attempting to map network drive." -Level INFO
     try {
         $credentialInfo = Get-ShareCredential -Target $CredentialTarget
