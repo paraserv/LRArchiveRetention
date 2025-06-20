@@ -1,0 +1,32 @@
+{
+    "MinimumRetentionDays": 90,
+    "MaxLogSizeMB": 10,
+    "MaxLogFiles": 10,
+    "MaxRetries": 3,
+    "RetryDelaySeconds": 1,
+    "DefaultIncludeFileTypes": [".lca"],
+    "ProgressUpdateIntervalSeconds": 30,
+    "ParallelThreads": 4,
+    "BatchSize": 1000,
+    "NetworkTimeout": 30,
+    "ValidateBeforeDelete": true,
+    "EnableDetailedLogging": false,
+    "LogRotationSettings": {
+        "MainLogMaxSizeMB": 10,
+        "RetentionLogMaxSizeMB": 50,
+        "CompressOldLogs": true,
+        "KeepCompressedLogsDays": 90
+    },
+    "PerformanceSettings": {
+        "UseWindowsSearchIndex": false,
+        "EnableCaching": true,
+        "CacheValidityHours": 12,
+        "MaxMemoryUsageMB": 500
+    },
+    "NotificationSettings": {
+        "SendEmailOnCompletion": false,
+        "EmailRecipients": [],
+        "SendEmailOnError": false,
+        "ErrorEmailRecipients": []
+    }
+} 
