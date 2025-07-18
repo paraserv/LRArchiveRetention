@@ -7,10 +7,10 @@ set -e
 
 # --- Configuration ---
 SSH_USER="administrator"
-SSH_HOST="10.20.1.200"
+SSH_HOST="10.20.1.20"
 SSH_KEY="~/.ssh/id_rsa_windows"
-CREDENTIAL_TARGET="MainRun"
-REMOTE_SCRIPT_DIR='C:\LogRhythm\Scripts\ArchiveV2'
+CREDENTIAL_TARGET="NAS_CREDS"
+REMOTE_SCRIPT_DIR='C:\LR\Scripts\LRArchiveRetention'
 # In bash, to represent a literal UNC path in a variable, it's safest to use single quotes
 # or correctly escaped double quotes. We use double quotes here for consistency.
 ARCHIVE_PATH="\\\\10.20.1.7\\LRArchives"
