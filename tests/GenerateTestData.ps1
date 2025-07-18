@@ -90,29 +90,46 @@ function Show-DetailedProgress {
         $elapsedTime = $currentTime - $script:startTime
         $percentComplete = ($ProcessedFolders / $TotalFolders) * 100
         
+        # Calculate rates and ETA with better initial state handling
         $foldersPerSecond = if ($elapsedTime.TotalSeconds -gt 0) { $ProcessedFolders / $elapsedTime.TotalSeconds } else { 0 }
         $filesPerSecond = if ($elapsedTime.TotalSeconds -gt 0) { $ProcessedFiles / $elapsedTime.TotalSeconds } else { 0 }
+        $dataSizeGB = $script:totalBytesGenerated / 1GB
+        $dataRateMBps = if ($elapsedTime.TotalSeconds -gt 0) { ($script:totalBytesGenerated / 1MB) / $elapsedTime.TotalSeconds } else { 0 }
         
-        $estimatedTimeRemaining = if ($foldersPerSecond -gt 0) {
+        # Determine if we have enough data for meaningful calculations
+        $hasValidData = ($ProcessedFolders -gt 0 -and $elapsedTime.TotalSeconds -gt 10)
+        
+        $estimatedTimeRemaining = if ($hasValidData -and $foldersPerSecond -gt 0) {
             $remainingFolders = $TotalFolders - $ProcessedFolders
             $remainingSeconds = $remainingFolders / $foldersPerSecond
             [TimeSpan]::FromSeconds($remainingSeconds)
         } else {
-            [TimeSpan]::Zero
+            $null
         }
-        
-        $dataSizeGB = $script:totalBytesGenerated / 1GB
-        $dataRateMBps = if ($elapsedTime.TotalSeconds -gt 0) { ($script:totalBytesGenerated / 1MB) / $elapsedTime.TotalSeconds } else { 0 }
         
         Write-Host ""
         Write-Host "=== LARGE-SCALE GENERATION PROGRESS ===" -ForegroundColor Green
         Write-Host "Folders: $ProcessedFolders/$TotalFolders ($([math]::Round($percentComplete, 1))%)" -ForegroundColor Cyan
         Write-Host "Files: $ProcessedFiles (estimated total: $TotalEstimatedFiles)" -ForegroundColor Cyan
         Write-Host "Data Generated: $([math]::Round($dataSizeGB, 2)) GB" -ForegroundColor Cyan
-        Write-Host "Performance: $([math]::Round($foldersPerSecond, 2)) folders/sec, $([math]::Round($filesPerSecond, 0)) files/sec" -ForegroundColor White
-        Write-Host "Data Rate: $([math]::Round($dataRateMBps, 2)) MB/sec" -ForegroundColor White
+        
+        # Show performance with better initial state messaging
+        if ($hasValidData) {
+            Write-Host "Performance: $([math]::Round($foldersPerSecond, 2)) folders/sec, $([math]::Round($filesPerSecond, 0)) files/sec" -ForegroundColor White
+            Write-Host "Data Rate: $([math]::Round($dataRateMBps, 2)) MB/sec" -ForegroundColor White
+        } else {
+            Write-Host "Performance: Starting parallel processing..." -ForegroundColor Yellow
+            Write-Host "Data Rate: Initializing..." -ForegroundColor Yellow
+        }
+        
         Write-Host "Elapsed: $($elapsedTime.ToString('hh\:mm\:ss'))" -ForegroundColor White
-        Write-Host "ETA: $($estimatedTimeRemaining.ToString('hh\:mm\:ss'))" -ForegroundColor White
+        
+        # Show ETA with better messaging
+        if ($estimatedTimeRemaining) {
+            Write-Host "ETA: $($estimatedTimeRemaining.ToString('hh\:mm\:ss'))" -ForegroundColor White
+        } else {
+            Write-Host "ETA: Calculating..." -ForegroundColor Yellow
+        }
         Write-Host ""
         
         $script:lastProgressUpdate = $currentTime
