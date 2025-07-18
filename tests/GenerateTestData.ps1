@@ -82,23 +82,23 @@ function Show-DetailedProgress {
         [int]$TotalEstimatedFiles,
         [bool]$Force = $false
     )
-    
+
     $currentTime = Get-Date
     $timeSinceLastUpdate = ($currentTime - $script:lastProgressUpdate).TotalSeconds
-    
+
     if ($Force -or $timeSinceLastUpdate -ge $ProgressUpdateIntervalSeconds) {
         $elapsedTime = $currentTime - $script:startTime
         $percentComplete = ($ProcessedFolders / $TotalFolders) * 100
-        
+
         # Calculate rates and ETA with better initial state handling
         $foldersPerSecond = if ($elapsedTime.TotalSeconds -gt 0) { $ProcessedFolders / $elapsedTime.TotalSeconds } else { 0 }
         $filesPerSecond = if ($elapsedTime.TotalSeconds -gt 0) { $ProcessedFiles / $elapsedTime.TotalSeconds } else { 0 }
         $dataSizeGB = $script:totalBytesGenerated / 1GB
         $dataRateMBps = if ($elapsedTime.TotalSeconds -gt 0) { ($script:totalBytesGenerated / 1MB) / $elapsedTime.TotalSeconds } else { 0 }
-        
+
         # Determine if we have enough data for meaningful calculations
         $hasValidData = ($ProcessedFolders -gt 0 -and $elapsedTime.TotalSeconds -gt 10)
-        
+
         $estimatedTimeRemaining = if ($hasValidData -and $foldersPerSecond -gt 0) {
             $remainingFolders = $TotalFolders - $ProcessedFolders
             $remainingSeconds = $remainingFolders / $foldersPerSecond
@@ -106,13 +106,13 @@ function Show-DetailedProgress {
         } else {
             $null
         }
-        
+
         Write-Host ""
         Write-Host "=== LARGE-SCALE GENERATION PROGRESS ===" -ForegroundColor Green
         Write-Host "Folders: $ProcessedFolders/$TotalFolders ($([math]::Round($percentComplete, 1))%)" -ForegroundColor Cyan
         Write-Host "Files: $ProcessedFiles (estimated total: $TotalEstimatedFiles)" -ForegroundColor Cyan
         Write-Host "Data Generated: $([math]::Round($dataSizeGB, 2)) GB" -ForegroundColor Cyan
-        
+
         # Show performance with better initial state messaging
         if ($hasValidData) {
             Write-Host "Performance: $([math]::Round($foldersPerSecond, 2)) folders/sec, $([math]::Round($filesPerSecond, 0)) files/sec" -ForegroundColor White
@@ -121,9 +121,9 @@ function Show-DetailedProgress {
             Write-Host "Performance: Starting parallel processing..." -ForegroundColor Yellow
             Write-Host "Data Rate: Initializing..." -ForegroundColor Yellow
         }
-        
+
         Write-Host "Elapsed: $($elapsedTime.ToString('hh\:mm\:ss'))" -ForegroundColor White
-        
+
         # Show ETA with better messaging
         if ($estimatedTimeRemaining) {
             Write-Host "ETA: $($estimatedTimeRemaining.ToString('hh\:mm\:ss'))" -ForegroundColor White
@@ -131,7 +131,7 @@ function Show-DetailedProgress {
             Write-Host "ETA: Calculating..." -ForegroundColor Yellow
         }
         Write-Host ""
-        
+
         $script:lastProgressUpdate = $currentTime
     }
 }
@@ -284,15 +284,15 @@ if (($freeSpace -ne $null -and $totalDisk -ne $null) -or $maxAllowedBytes -ne $n
             Write-Host "ERROR: Not enough space to generate even a single file under the specified constraints." -ForegroundColor Red
             exit 1
         }
-        
+
         $origFolderCount = $FolderCount
         $origMaxFiles = $MaxFiles
-        
+
         # Try to maintain the user's intended MinFiles-MaxFiles range
         # First, see if we can fit with reduced folder count but keeping file range
         $avgFilesPerFolder = ($MinFiles + $MaxFiles) / 2
         $idealFolderCount = [math]::Floor($totalFilesAllowed / $avgFilesPerFolder)
-        
+
         if ($idealFolderCount -ge 1) {
             # We can maintain the file range, just reduce folder count
             $FolderCount = [math]::Min($idealFolderCount, $FolderCount)
@@ -326,7 +326,7 @@ for ($i = 0; $i -lt $FolderCount; $i++) {
     $FolderName = "${DateStr}_1_1_1_${Ticks}"
     $FileCount = $Random.Next($MinFiles, $MaxFiles + 1)
     $TotalEstimatedFiles += $FileCount
-    
+
     # Pre-generate ALL file data for this folder
     $FileDataList = [System.Collections.Generic.List[PSCustomObject]]::new($FileCount)
     for ($f = 0; $f -lt $FileCount; $f++) {
@@ -336,14 +336,14 @@ for ($i = 0; $i -lt $FolderCount; $i++) {
         $RandomNum = $Random.Next(1000, 9999)
         $FileName = "$DateStr`_$TimeStr`_$RandomNum.lca"
         $FileSize = $Random.Next($MinFileSizeBytes, $MaxFileSizeBytes + 1)
-        
+
         $FileDataList.Add([PSCustomObject]@{
             Name = $FileName
             Size = $FileSize
             Date = $FileDate
         })
     }
-    
+
     $AllFolderData.Add([PSCustomObject]@{
         Name = $FolderName
         Date = $FolderDate
@@ -385,59 +385,59 @@ Show-DetailedProgress -ProcessedFolders 0 -TotalFolders $FolderArray.Length -Pro
 for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $BatchSize) {
     $batchEnd = [Math]::Min($batchStart + $BatchSize - 1, $FolderArray.Length - 1)
     $batchIndices = $batchStart..$batchEnd
-    
+
     # Process batch with maximum parallelism
     $batchResults = $batchIndices | ForEach-Object -Parallel {
         $folderIndex = $_
         $folder = ($using:FolderArray)[$folderIndex]
         $RootPath = $using:RootPath
         $BufferPatterns = $using:BufferPatterns
-        
+
         # Create folder using .NET (faster than New-Item)
         $FolderPath = [System.IO.Path]::Combine($RootPath, $folder.Name)
         [System.IO.Directory]::CreateDirectory($FolderPath) | Out-Null
-        
+
         $folderBytesGenerated = 0
         $folderFilesCreated = 0
-        
+
         # Ultra-fast file creation with minimal syscalls
         foreach ($fileData in $folder.Files) {
             try {
                 $FilePath = [System.IO.Path]::Combine($FolderPath, $fileData.Name)
-                
+
                 # Use FileStream with optimized buffer size and write strategy
                 $FileStream = [System.IO.FileStream]::new(
-                    $FilePath, 
-                    [System.IO.FileMode]::Create, 
+                    $FilePath,
+                    [System.IO.FileMode]::Create,
                     [System.IO.FileAccess]::Write,
                     [System.IO.FileShare]::None,
                     131072,  # 128KB buffer (larger than default)
                     [System.IO.FileOptions]::SequentialScan
                 )
-                
+
                 try {
                     $BytesWritten = 0
                     $FileSize = $fileData.Size
                     $PatternIndex = $folderIndex % $BufferPatterns.Length
                     $Buffer = $BufferPatterns[$PatternIndex]
-                    
+
                     # Write in large chunks with minimal loop overhead
                     while ($BytesWritten -lt $FileSize) {
                         $WriteSize = [Math]::Min(65536, $FileSize - $BytesWritten)
                         $FileStream.Write($Buffer, 0, $WriteSize)
                         $BytesWritten += $WriteSize
                     }
-                    
+
                     # Force write to disk immediately (optional - can comment out for even more speed)
                     $FileStream.Flush($true)
-                    
+
                     $folderBytesGenerated += $FileSize
                     $folderFilesCreated++
                 }
                 finally {
                     $FileStream.Dispose()
                 }
-                
+
                 # Set timestamps using .NET (faster than Get-Item)
                 [System.IO.File]::SetCreationTime($FilePath, $fileData.Date)
                 [System.IO.File]::SetLastWriteTime($FilePath, $fileData.Date)
@@ -447,7 +447,7 @@ for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $Batch
                 Write-Warning "Failed to create file $($fileData.Name): $_"
             }
         }
-        
+
         # Return batch results
         return @{
             FolderIndex = $folderIndex
@@ -455,16 +455,16 @@ for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $Batch
             FilesCreated = $folderFilesCreated
         }
     } -ThrottleLimit $ThrottleLimit
-    
+
     # Update progress tracking
     $ProcessedFolders += ($batchEnd - $batchStart + 1)
-    
+
     # Accumulate batch results
     foreach ($result in $batchResults) {
         $script:totalBytesGenerated += $result.BytesGenerated
         $ProcessedFiles += $result.FilesCreated
     }
-    
+
     # Show detailed progress
     Show-DetailedProgress -ProcessedFolders $ProcessedFolders -TotalFolders $FolderArray.Length -ProcessedFiles $ProcessedFiles -TotalEstimatedFiles $TotalEstimatedFiles
 }

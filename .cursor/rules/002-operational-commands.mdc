@@ -1,6 +1,6 @@
 ---
 description: Running, executing, copying, testing scripts
-globs: 
+globs:
 alwaysApply: false
 ---
 # ⭐ QUICK QUOTING & ESCAPING CHEAT-SHEET ⭐
@@ -24,7 +24,7 @@ When running PowerShell through SSH:
 
 # Script Commands
 
-- **Copy Script to Server**: 
+- **Copy Script to Server**:
   ```
   scp -i ~/.ssh/id_rsa_windows ArchiveRetention.ps1 administrator@10.20.1.200:'C:/LogRhythm/Scripts/ArchiveV2/'
   ```

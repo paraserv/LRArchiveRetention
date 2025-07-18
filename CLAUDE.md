@@ -54,11 +54,14 @@ cd tests && bash RunArchiveRetentionTests.sh
 source winrm_env/bin/activate
 
 # WinRM for PowerShell operations (PREFERRED)
+# First, get password from keychain
+WINDOWS_PASSWORD=$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)
+
 python3 -c "
-import winrm
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                       transport='kerberos', 
+import winrm, os
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', os.environ['WINDOWS_PASSWORD']),
+                       transport='kerberos',
                        server_cert_validation='ignore')
 
 # Example: Run PowerShell commands with clean syntax
@@ -87,13 +90,32 @@ ssh windev01
 ```
 
 **WinRM Access** (Preferred for PowerShell automation):
+
+First, store the Windows service account credentials in your Mac's keychain:
+```bash
+# Store Windows service account password in keychain (run once)
+security add-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w
+```
+
+Then use it securely in your WinRM sessions:
+```bash
+# Get Windows service account password from keychain
+WINDOWS_PASSWORD=$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)
+```
+
 ```python
 import winrm
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                       transport='kerberos', 
+import os
+
+# Get password from environment (set via keychain retrieval above)
+windows_password = os.environ.get('WINDOWS_PASSWORD')
+if not windows_password:
+    raise ValueError("WINDOWS_PASSWORD environment variable not set. Run keychain retrieval first.")
+
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', windows_password),
+                       transport='kerberos',
                        server_cert_validation='ignore')
-# Service account password: logrhythm!1 (default test password)
 ```
 
 ### NAS Access (10.20.1.7)
@@ -111,7 +133,7 @@ NAS_PASSWORD=$(security find-internet-password -s "10.20.1.7" -a "sanghanas" -w)
 ```powershell
 # On Windows server, save the credential (use actual password from keychain)
 cd C:\LR\Scripts\LRArchiveRetention
-.\Save-Credential.ps1 -Target "NAS_CREDS" -SharePath "\\10.20.1.7\LRArchives" -UserName "sanghanas" -Password "ACTUAL_PASSWORD" -Quiet
+.\Save-Credential.ps1 -Target "NAS_CREDS" -SharePath "\\10.20.1.7\LRArchives" -UserName "sanghanas" -Password "YOUR_NAS_PASSWORD" -Quiet
 ```
 
 **Verification**:

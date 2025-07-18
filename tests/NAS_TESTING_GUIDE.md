@@ -1,8 +1,8 @@
 # NAS Testing Guide
 
-**Date:** July 18, 2025  
-**Environment:** Windows Server VM (windev01.lab.paraserv.com)  
-**Target:** QNAP NAS at 10.20.1.7/LRArchives  
+**Date:** July 18, 2025
+**Environment:** Windows Server VM (windev01.lab.paraserv.com)
+**Target:** QNAP NAS at 10.20.1.7/LRArchives
 
 ## 🎯 Overview
 
@@ -128,12 +128,12 @@ $cred = New-Object System.Management.Automation.PSCredential($username, $passwor
 try {
     # Map network drive
     New-PSDrive -Name "TestDrive" -PSProvider FileSystem -Root "\\10.20.1.7\LRArchives" -Credential $cred -ErrorAction Stop
-    
+
     Write-Host "Network drive mapped successfully."
-    
+
     # Run retention script
     .\ArchiveRetention.ps1 -ArchivePath "TestDrive:\" -RetentionDays 1000
-    
+
 } catch {
     Write-Error "Failed to map network drive: $($_.Exception.Message)"
 } finally {

@@ -89,9 +89,9 @@ git status
 
 ## 🧾 Naming Conventions
 
-- **Markdown**: `lower-case-with-dashes.md` (e.g., `system-overview.md`)  
+- **Markdown**: `lower-case-with-dashes.md` (e.g., `system-overview.md`)
   _Exception_: `README.md` in project root
 
-- **Bash**: `lower_case_with_underscores.sh` (e.g., `sync_files.sh`)  
-- **PowerShell**: `PascalCase.ps1` (e.g., `StartBackup.ps1`)  
+- **Bash**: `lower_case_with_underscores.sh` (e.g., `sync_files.sh`)
+- **PowerShell**: `PascalCase.ps1` (e.g., `StartBackup.ps1`)
   ➤ Rename existing `.ps1` files to match PascalCase

@@ -196,6 +196,5 @@ Contributions are welcome! Please follow the standard GitHub fork and pull reque
 
 ## Author
 
-Nathan Church  
+Nathan Church
 Exabeam Professional Services
-

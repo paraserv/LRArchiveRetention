@@ -4,6 +4,32 @@
 
 This document explains how to set up WinRM (Windows Remote Management) connectivity for testing the LRArchiveRetention tools on Windows Server VMs.
 
+## 🔐 Security Setup (Required First)
+
+**IMPORTANT**: Before using any WinRM connections, you must store the Windows service account credentials in your macOS keychain for security.
+
+### Store Windows Credentials in Keychain
+
+```bash
+# Store Windows service account password in keychain (run once)
+security add-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w
+
+# You will be prompted to enter the password securely
+# This credential will be used for all WinRM connections
+```
+
+### Verify Credential Storage
+
+```bash
+# Verify the credential is stored (will show account info but not password)
+security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM"
+
+# Test password retrieval (this should output the password)
+security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w
+```
+
+> **Security Note**: This approach ensures passwords are never hardcoded in scripts or documentation and are stored securely in your system's keychain with proper encryption.
+
 ## Prerequisites
 
 - Python 3.8 or later
@@ -72,10 +98,8 @@ print('WinRM support: OK')
 ### 2. Get Kerberos Ticket
 
 ```bash
-# Get authentication ticket
-kinit svc_logrhythm@LAB.PARASERV.COM
-
-# Enter password when prompted: logrhythm!1
+# Get authentication ticket (password retrieved from keychain)
+echo "$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)" | kinit svc_logrhythm@LAB.PARASERV.COM
 
 # Verify ticket
 klist
@@ -87,11 +111,23 @@ klist
 
 ```python
 import winrm
+import os
+import subprocess
+
+# Get password from keychain
+def get_windows_password():
+    result = subprocess.run([
+        'security', 'find-internet-password',
+        '-s', 'windev01.lab.paraserv.com',
+        '-a', 'svc_logrhythm@LAB.PARASERV.COM',
+        '-w'
+    ], capture_output=True, text=True)
+    return result.stdout.strip()
 
 # Create WinRM session
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                       transport='kerberos', 
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
+                       transport='kerberos',
                        server_cert_validation='ignore')
 
 # Test basic command
@@ -126,7 +162,7 @@ echo "Activating WinRM environment..."
 source winrm_env/bin/activate
 
 echo "Getting Kerberos ticket..."
-echo "logrhythm!1" | kinit svc_logrhythm@LAB.PARASERV.COM
+echo "$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)" | kinit svc_logrhythm@LAB.PARASERV.COM
 
 echo "Verifying ticket..."
 klist
@@ -149,30 +185,30 @@ import sys
 def test_winrm_connection():
     try:
         # Create session
-        session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                               auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                               transport='kerberos', 
+        session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                               auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
+                               transport='kerberos',
                                server_cert_validation='ignore')
-        
+
         # Test basic command
         result = session.run_cmd('hostname')
         hostname = result.std_out.decode().strip()
         print(f"✅ Connected to: {hostname}")
-        
+
         # Test PowerShell
         result = session.run_ps('$PSVersionTable.PSVersion')
         ps_version = result.std_out.decode().strip()
         print(f"✅ PowerShell version: {ps_version}")
-        
+
         # Test session persistence
         session.run_ps('$testVar = "WinRM Session Test"')
         result = session.run_ps('$testVar')
         test_result = result.std_out.decode().strip()
         print(f"✅ Session persistence: {test_result}")
-        
+
         print("✅ WinRM connection test successful!")
         return True
-        
+
     except Exception as e:
         print(f"❌ WinRM connection test failed: {e}")
         return False

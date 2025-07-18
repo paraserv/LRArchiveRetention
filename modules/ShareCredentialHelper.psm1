@@ -13,7 +13,7 @@
     Author: System Administrator
     Version: 2.0
     Requires: PowerShell 5.1 or later
-    
+
     Security Features:
     - AES-256 encryption for credential storage
     - Secure memory handling and cleanup
@@ -61,7 +61,7 @@ $script:MAX_CREDENTIAL_AGE_DAYS = 365
 function Enable-ShareCredentialLogging {
     [CmdletBinding()]
     param()
-    
+
     $script:LoggingEnabled = $true
     Write-Log "Logging enabled for ShareCredentialHelper module" -Level INFO
 }
@@ -73,7 +73,7 @@ function Enable-ShareCredentialLogging {
 function Disable-ShareCredentialLogging {
     [CmdletBinding()]
     param()
-    
+
     if ($script:LoggingEnabled) {
         Write-Log "Logging disabled for ShareCredentialHelper module" -Level INFO
     }
@@ -92,18 +92,18 @@ function Test-IsWindows {
     [CmdletBinding()]
     [OutputType([bool])]
     param()
-    
+
     # PowerShell 5.1 and earlier are Windows-only
     if ($PSVersionTable.PSVersion.Major -lt 6) {
         return $true
     }
-    
+
     # PowerShell 6+ has automatic variables
     $isWindowsVar = Get-Variable -Name 'IsWindows' -ErrorAction SilentlyContinue
     if ($isWindowsVar) {
         return $isWindowsVar.Value
     }
-    
+
     # Fallback method for edge cases
     return [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
 }
@@ -119,7 +119,7 @@ function Clear-SensitiveMemory {
         [AllowEmptyString()]
         [ref[]]$Variables
     )
-    
+
     if ($Variables) {
         foreach ($var in $Variables) {
             if ($var.Value) {
@@ -127,7 +127,7 @@ function Clear-SensitiveMemory {
             }
         }
     }
-    
+
     # Force garbage collection to clear sensitive data
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
@@ -145,12 +145,12 @@ function Test-SafeFileName {
         [Parameter(Mandatory=$true)]
         [string]$FileName
     )
-    
+
     # Check for invalid characters and reserved names
     $invalidChars = [System.IO.Path]::GetInvalidFileNameChars() -join ''
     $reservedNames = @('CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9')
-    
-    return ($FileName -match '^[a-zA-Z0-9_.-]+$') -and 
+
+    return ($FileName -match '^[a-zA-Z0-9_.-]+$') -and
            ($FileName -notmatch "[$([regex]::Escape($invalidChars))]") -and
            ($FileName.ToUpper() -notin $reservedNames) -and
            ($FileName.Length -le 100)
@@ -169,16 +169,16 @@ function Write-Log {
     param(
         [Parameter(Mandatory=$true)]
         [string]$Message,
-        
+
         [Parameter(Mandatory=$false)]
         [ValidateSet('DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL', 'SUCCESS', 'SECURITY')]
         [string]$Level = 'INFO',
-        
+
         [switch]$NoConsoleOutput,
-        
+
         [switch]$SensitiveData
     )
-    
+
     # Only initialize logging if enabled and not already configured
     if ($script:LoggingEnabled) {
         if ([string]::IsNullOrEmpty($script:LogFile)) {
@@ -194,15 +194,15 @@ function Write-Log {
                 'FATAL'    { Write-Host $Message -BackgroundColor Red -ForegroundColor White }
                 'WARNING'  { Write-Host $Message -ForegroundColor Yellow }
                 'SUCCESS'  { Write-Host $Message -ForegroundColor Green }
-                'INFO'     { 
-                    if ($VerbosePreference -eq 'Continue') { 
-                        Write-Host $Message -ForegroundColor Cyan 
-                    } 
+                'INFO'     {
+                    if ($VerbosePreference -eq 'Continue') {
+                        Write-Host $Message -ForegroundColor Cyan
+                    }
                 }
-                'DEBUG'    { 
-                    if ($VerbosePreference -eq 'Continue') { 
-                        Write-Host $Message -ForegroundColor Gray 
-                    } 
+                'DEBUG'    {
+                    if ($VerbosePreference -eq 'Continue') {
+                        Write-Host $Message -ForegroundColor Gray
+                    }
                 }
                 # Suppress SECURITY and other levels when logging is disabled
                 default    { }
@@ -210,9 +210,9 @@ function Write-Log {
         }
         return  # Exit early if logging is disabled
     }
-    
+
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
-    
+
     # Filter sensitive information from logs
     $logMessage = if ($SensitiveData) {
         "[$timestamp] [$Level] [REDACTED] Sensitive operation completed"
@@ -221,7 +221,7 @@ function Write-Log {
         $filteredMessage = $Message -replace '(password[=:\s]+)[^\s]+', '$1***' -replace '(key[=:\s]+)[^\s]+', '$1***'
         "[$timestamp] [$Level] $filteredMessage"
     }
-    
+
     # Console output with color coding (only show important messages unless verbose)
     if (-not $NoConsoleOutput) {
         switch ($Level) {
@@ -229,36 +229,36 @@ function Write-Log {
             'FATAL'    { Write-Host $logMessage -BackgroundColor Red -ForegroundColor White }
             'WARNING'  { Write-Host $logMessage -ForegroundColor Yellow }
             'SUCCESS'  { Write-Host $logMessage -ForegroundColor Green }
-            'INFO'     { 
-                if ($VerbosePreference -eq 'Continue') { 
-                    Write-Host $logMessage -ForegroundColor Cyan 
-                } 
+            'INFO'     {
+                if ($VerbosePreference -eq 'Continue') {
+                    Write-Host $logMessage -ForegroundColor Cyan
+                }
             }
-            'SECURITY' { 
-                if ($VerbosePreference -eq 'Continue') { 
-                    Write-Host $logMessage -ForegroundColor Magenta 
-                } 
+            'SECURITY' {
+                if ($VerbosePreference -eq 'Continue') {
+                    Write-Host $logMessage -ForegroundColor Magenta
+                }
             }
-            'DEBUG'    { 
-                if ($VerbosePreference -eq 'Continue' -or $DebugPreference -eq 'Continue') { 
-                    Write-Host $logMessage -ForegroundColor Gray 
-                } 
+            'DEBUG'    {
+                if ($VerbosePreference -eq 'Continue' -or $DebugPreference -eq 'Continue') {
+                    Write-Host $logMessage -ForegroundColor Gray
+                }
             }
             default    { Write-Host $logMessage }
         }
     }
-    
+
     # File logging with rotation (only if logging is enabled)
     if ($script:LoggingEnabled -and -not [string]::IsNullOrEmpty($script:LogFile)) {
         try {
             # Check log file size and rotate if necessary
-            if ((Test-Path -Path $script:LogFile) -and 
+            if ((Test-Path -Path $script:LogFile) -and
                 ((Get-Item -Path $script:LogFile).Length / 1MB) -gt $script:MaxLogSizeMB) {
                 Rotate-LogFile
             }
-            
+
             # Log file will be created in script directory (no need to create separate directory)
-            
+
             # Write to log file
             Add-Content -Path $script:LogFile -Value $logMessage -ErrorAction Stop -Encoding UTF8
         }
@@ -275,11 +275,11 @@ function Write-Log {
 function Initialize-Logging {
     [CmdletBinding()]
     param()
-    
+
     try {
         # Log directly in the script directory (no separate Logs folder)
         $script:LogFile = Join-Path -Path $PSScriptRoot -ChildPath "$($script:ModuleName)-$(Get-Date -Format 'yyyy-MM').log"
-        
+
         Write-Log "Logging initialized for module $script:ModuleName v$script:ModuleVersion" -Level INFO
         Write-Log "Log file: $script:LogFile" -Level DEBUG
     }
@@ -295,18 +295,18 @@ function Initialize-Logging {
 function Rotate-LogFile {
     [CmdletBinding()]
     param()
-    
+
     try {
         $logInfo = Get-Item -Path $script:LogFile
         $archiveFileName = "$($logInfo.BaseName)-$(Get-Date -Format 'yyyy-MM-dd-HHmmss')$($logInfo.Extension)"
         $archivePath = Join-Path -Path $logInfo.DirectoryName -ChildPath $archiveFileName
-        
+
         Move-Item -Path $script:LogFile -Destination $archivePath
         Write-Log "Log file rotated to: $archivePath" -Level INFO
-        
+
         # Clean up old log files
         $cutoffDate = (Get-Date).AddDays(-$script:LogRetentionDays)
-        Get-ChildItem -Path $logInfo.DirectoryName -Filter "*.log" | 
+        Get-ChildItem -Path $logInfo.DirectoryName -Filter "*.log" |
             Where-Object { $_.LastWriteTime -lt $cutoffDate } |
             Remove-Item -Force
     }
@@ -328,39 +328,39 @@ function Set-SecurePermissions {
     param(
         [Parameter(Mandatory=$true)]
         [string]$Path,
-        
+
         [switch]$IsDirectory,
-        
+
         [switch]$ReadOnly
     )
-    
+
     try {
         if (Test-IsWindows) {
             # Windows ACL configuration
             $acl = Get-Acl -Path $Path
             $acl.SetAccessRuleProtection($true, $false)  # Disable inheritance
-            
+
             # Get current user and SYSTEM account
             $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
             $systemSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
             $systemUser = $systemSid.Translate([System.Security.Principal.NTAccount])
-            
+
             # Set permissions based on type
             $permission = if ($ReadOnly) { 'Read' } else { 'FullControl' }
             $inheritanceFlags = if ($IsDirectory) { 'ContainerInherit,ObjectInherit' } else { 'None' }
-            
+
             # Add current user permissions
             $userRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
                 $currentUser, $permission, $inheritanceFlags, 'None', 'Allow'
             )
             $acl.AddAccessRule($userRule)
-            
+
             # Add SYSTEM permissions
             $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
                 $systemUser, $permission, $inheritanceFlags, 'None', 'Allow'
             )
             $acl.AddAccessRule($systemRule)
-            
+
             Set-Acl -Path $Path -AclObject $acl
             Write-Log "Set Windows ACL permissions on: $Path" -Level DEBUG
         }
@@ -371,7 +371,7 @@ function Set-SecurePermissions {
             } else {
                 if ($ReadOnly) { '0400' } else { '0600' }
             }
-            
+
             & chmod $mode $Path 2>$null
             Write-Log "Set Unix permissions ($mode) on: $Path" -Level DEBUG
         }
@@ -389,24 +389,24 @@ function Initialize-CredentialStore {
     [CmdletBinding()]
     [OutputType([bool])]
     param()
-    
+
     try {
         Write-Log "Initializing credential store at: $script:CredentialStorePath" -Level DEBUG
-        
+
         # Create credential store directory if it doesn't exist
         if (-not (Test-Path -Path $script:CredentialStorePath)) {
             $null = New-Item -Path $script:CredentialStorePath -ItemType Directory -Force
             Write-Log "Created credential store directory" -Level SUCCESS
         }
-        
+
         # Set secure permissions
         Set-SecurePermissions -Path $script:CredentialStorePath -IsDirectory
-        
+
         # Validate directory security
         if (-not (Test-DirectorySecurity -Path $script:CredentialStorePath)) {
             Write-Log "Credential store directory security validation failed" -Level WARNING
         }
-        
+
         return $true
     }
     catch {
@@ -427,23 +427,23 @@ function Test-DirectorySecurity {
         [Parameter(Mandatory=$true)]
         [string]$Path
     )
-    
+
     try {
         if (-not (Test-Path -Path $Path)) {
             return $false
         }
-        
+
         if (Test-IsWindows) {
             $acl = Get-Acl -Path $Path
             $accessRules = $acl.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
-            
+
             # Check that only authorized users have access
             $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
             $systemSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
             $systemUser = $systemSid.Translate([System.Security.Principal.NTAccount]).Value
-            
+
             $authorizedUsers = @($currentUser, $systemUser, 'NT AUTHORITY\SYSTEM')
-            
+
             foreach ($rule in $accessRules) {
                 if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin $authorizedUsers) {
                     Write-Log "Unauthorized access found for: $($rule.IdentityReference.Value)" -Level WARNING
@@ -451,7 +451,7 @@ function Test-DirectorySecurity {
                 }
             }
         }
-        
+
         return $true
     }
     catch {
@@ -472,23 +472,23 @@ function Get-EncryptionKey {
     [CmdletBinding()]
     [OutputType([byte[]])]
     param()
-    
+
     try {
         # Ensure credential store exists
         if (-not (Test-Path -Path $script:CredentialStorePath)) {
             Initialize-CredentialStore | Out-Null
         }
-        
+
         # Load existing key if available
         if (Test-Path -Path $script:KeyPath) {
             Write-Log "Loading existing encryption key" -Level DEBUG
             $keyData = Get-Content -Path $script:KeyPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            
+
             # Validate key structure
             if (-not $keyData.Key -or -not $keyData.Algorithm -or $keyData.Algorithm -ne 'AES256') {
                 throw "Invalid key file format"
             }
-            
+
             # Check key age and warn if old
             if ($keyData.Created) {
                 $keyAge = (Get-Date) - [datetime]$keyData.Created
@@ -496,14 +496,14 @@ function Get-EncryptionKey {
                     Write-Log "Encryption key is $([math]::Round($keyAge.TotalDays)) days old. Consider regenerating." -Level WARNING
                 }
             }
-            
+
             return [System.Convert]::FromBase64String($keyData.Key)
         }
-        
+
         # Generate new encryption key
         Write-Log "Generating new AES-256 encryption key" -Level INFO
         $key = New-Object byte[] $script:AES_KEY_SIZE
-        
+
         # Use cryptographically secure random number generator
         $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
         try {
@@ -512,7 +512,7 @@ function Get-EncryptionKey {
         finally {
             $rng.Dispose()
         }
-        
+
         # Save key with metadata
         $keyData = @{
             Key = [System.Convert]::ToBase64String($key)
@@ -521,12 +521,12 @@ function Get-EncryptionKey {
             KeySize = $script:AES_KEY_SIZE * 8
             ModuleVersion = $script:ModuleVersion
         }
-        
+
         $keyData | ConvertTo-Json -Depth 3 | Set-Content -Path $script:KeyPath -Force -Encoding UTF8
-        
+
         # Set restrictive permissions on key file
         Set-SecurePermissions -Path $script:KeyPath -ReadOnly
-        
+
         Write-Log "Encryption key generated and secured" -Level SUCCESS -SensitiveData
         return $key
     }
@@ -548,24 +548,24 @@ function ConvertFrom-SecureStringAES {
         [Parameter(Mandatory=$true)]
         [System.Security.SecureString]$SecureString
     )
-    
+
     $aes = $null
     $encryptor = $null
     $bstr = [IntPtr]::Zero
     $plainText = $null
     $plainBytes = $null
-    
+
     try {
         # Get encryption key
         $key = Get-EncryptionKey
-        
+
         # Convert SecureString to plain text temporarily
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
         $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        
+
         # Convert to bytes
         $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($plainText)
-        
+
         # Create AES encryption
         $aes = [System.Security.Cryptography.Aes]::Create()
         $aes.KeySize = $script:AES_KEY_SIZE * 8
@@ -573,16 +573,16 @@ function ConvertFrom-SecureStringAES {
         $aes.GenerateIV()
         $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-        
+
         # Encrypt the data
         $encryptor = $aes.CreateEncryptor()
         $encryptedBytes = $encryptor.TransformFinalBlock($plainBytes, 0, $plainBytes.Length)
-        
+
         # Combine IV and encrypted data
         $result = New-Object byte[] ($aes.IV.Length + $encryptedBytes.Length)
         [System.Array]::Copy($aes.IV, 0, $result, 0, $aes.IV.Length)
         [System.Array]::Copy($encryptedBytes, 0, $result, $aes.IV.Length, $encryptedBytes.Length)
-        
+
         # Convert to base64
         return [System.Convert]::ToBase64String($result)
     }
@@ -595,9 +595,9 @@ function ConvertFrom-SecureStringAES {
         if ($bstr -ne [IntPtr]::Zero) {
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
         }
-        
+
         Clear-SensitiveMemory -Variables ([ref]$plainText, [ref]$plainBytes, [ref]$key)
-        
+
         if ($encryptor) { $encryptor.Dispose() }
         if ($aes) { $aes.Dispose() }
     }
@@ -615,31 +615,31 @@ function ConvertTo-SecureStringAES {
         [ValidateNotNullOrEmpty()]
         [string]$EncryptedString
     )
-    
+
     $aes = $null
     $decryptor = $null
     $plainText = $null
     $plainBytes = $null
-    
+
     try {
         # Get encryption key
         $key = Get-EncryptionKey
-        
+
         # Convert from base64
         $encryptedData = [System.Convert]::FromBase64String($EncryptedString)
-        
+
         # Validate data length
         if ($encryptedData.Length -lt $script:AES_IV_SIZE) {
             throw "Invalid encrypted data format"
         }
-        
+
         # Extract IV and encrypted bytes
         $iv = New-Object byte[] $script:AES_IV_SIZE
         $encryptedBytes = New-Object byte[] ($encryptedData.Length - $script:AES_IV_SIZE)
-        
+
         [System.Array]::Copy($encryptedData, 0, $iv, 0, $script:AES_IV_SIZE)
         [System.Array]::Copy($encryptedData, $script:AES_IV_SIZE, $encryptedBytes, 0, $encryptedBytes.Length)
-        
+
         # Create AES decryption
         $aes = [System.Security.Cryptography.Aes]::Create()
         $aes.KeySize = $script:AES_KEY_SIZE * 8
@@ -647,21 +647,21 @@ function ConvertTo-SecureStringAES {
         $aes.IV = $iv
         $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-        
+
         # Decrypt the data
         $decryptor = $aes.CreateDecryptor()
         $plainBytes = $decryptor.TransformFinalBlock($encryptedBytes, 0, $encryptedBytes.Length)
-        
+
         # Convert to string
         $plainText = [System.Text.Encoding]::UTF8.GetString($plainBytes)
-        
+
         # Convert to SecureString
         $secureString = New-Object System.Security.SecureString
         foreach ($char in $plainText.ToCharArray()) {
             $secureString.AppendChar($char)
         }
         $secureString.MakeReadOnly()
-        
+
         return $secureString
     }
     catch {
@@ -671,7 +671,7 @@ function ConvertTo-SecureStringAES {
     finally {
         # Secure cleanup
         Clear-SensitiveMemory -Variables ([ref]$plainText, [ref]$plainBytes, [ref]$key)
-        
+
         if ($decryptor) { $decryptor.Dispose() }
         if ($aes) { $aes.Dispose() }
     }
@@ -689,46 +689,46 @@ function Get-MachineSpecificKey {
     [CmdletBinding()]
     [OutputType([byte[]])]
     param()
-    
+
     try {
         # Gather machine-specific data
         $machineData = @()
-        
+
         # Computer UUID (most stable identifier)
         try {
             $uuid = (Get-WmiObject -Class Win32_ComputerSystemProduct -ErrorAction SilentlyContinue).UUID
             if ($uuid) { $machineData += $uuid }
         } catch { }
-        
+
         # Motherboard serial number
         try {
             $motherboard = (Get-WmiObject -Class Win32_BaseBoard -ErrorAction SilentlyContinue).SerialNumber
             if ($motherboard -and $motherboard -ne "To be filled by O.E.M.") { $machineData += $motherboard }
         } catch { }
-        
+
         # CPU ID
         try {
             $cpu = (Get-WmiObject -Class Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1).ProcessorId
             if ($cpu) { $machineData += $cpu }
         } catch { }
-        
+
         # Current user SID
         try {
             $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
             if ($userSid) { $machineData += $userSid }
         } catch { }
-        
+
         # Computer name as fallback
         $machineData += $env:COMPUTERNAME
-        
+
         # Combine all machine data
         $combinedData = $machineData -join "|"
         Write-Log "Machine binding data points: $($machineData.Count)" -Level DEBUG
-        
+
         # Derive key using PBKDF2
         $salt = [System.Text.Encoding]::UTF8.GetBytes("ShareCredentialHelper.v2.MachineKey")
         $pbkdf2 = [System.Security.Cryptography.Rfc2898DeriveBytes]::new($combinedData, $salt, 10000)
-        
+
         try {
             return $pbkdf2.GetBytes($script:AES_KEY_SIZE)
         }
@@ -753,7 +753,7 @@ function ConvertFrom-SecureStringEnhanced {
         [Parameter(Mandatory=$true)]
         [System.Security.SecureString]$SecureString
     )
-    
+
     # Try DPAPI first (Windows-only, most secure)
     if (Test-IsWindows) {
         try {
@@ -770,25 +770,25 @@ function ConvertFrom-SecureStringEnhanced {
             Write-Log "DPAPI encryption failed, falling back to AES: $_" -Level WARNING
         }
     }
-    
+
     # Fallback to machine-bound AES
     $aes = $null
     $encryptor = $null
     $bstr = [IntPtr]::Zero
     $plainText = $null
     $plainBytes = $null
-    
+
     try {
         # Get machine-specific key
         $key = Get-MachineSpecificKey
-        
+
         # Convert SecureString to plain text temporarily
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
         $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        
+
         # Convert to bytes
         $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($plainText)
-        
+
         # Create AES encryption
         $aes = [System.Security.Cryptography.Aes]::Create()
         $aes.KeySize = $script:AES_KEY_SIZE * 8
@@ -796,16 +796,16 @@ function ConvertFrom-SecureStringEnhanced {
         $aes.GenerateIV()
         $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-        
+
         # Encrypt the data
         $encryptor = $aes.CreateEncryptor()
         $encryptedBytes = $encryptor.TransformFinalBlock($plainBytes, 0, $plainBytes.Length)
-        
+
         # Combine IV and encrypted data
         $result = New-Object byte[] ($aes.IV.Length + $encryptedBytes.Length)
         [System.Array]::Copy($aes.IV, 0, $result, 0, $aes.IV.Length)
         [System.Array]::Copy($encryptedBytes, 0, $result, $aes.IV.Length, $encryptedBytes.Length)
-        
+
         Write-Log "Using machine-bound AES encryption" -Level DEBUG
         return @{
             Data = [System.Convert]::ToBase64String($result)
@@ -823,9 +823,9 @@ function ConvertFrom-SecureStringEnhanced {
         if ($bstr -ne [IntPtr]::Zero) {
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
         }
-        
+
         Clear-SensitiveMemory -Variables ([ref]$plainText, [ref]$plainBytes, [ref]$key)
-        
+
         if ($encryptor) { $encryptor.Dispose() }
         if ($aes) { $aes.Dispose() }
     }
@@ -842,7 +842,7 @@ function ConvertTo-SecureStringEnhanced {
         [Parameter(Mandatory=$true)]
         [hashtable]$EncryptedData
     )
-    
+
     switch ($EncryptedData.Method) {
         "DPAPI" {
             try {
@@ -854,34 +854,34 @@ function ConvertTo-SecureStringEnhanced {
                 throw "Failed to decrypt DPAPI data. Credential may have been created by different user/machine: $_"
             }
         }
-        
+
         "AES-MachineKey" {
             $aes = $null
             $decryptor = $null
             $plainText = $null
             $plainBytes = $null
-            
+
             try {
                 Write-Log "Decrypting using machine-bound AES" -Level DEBUG
-                
+
                 # Get machine-specific key
                 $key = Get-MachineSpecificKey
-                
+
                 # Convert from base64
                 $encryptedBytes = [System.Convert]::FromBase64String($EncryptedData.Data)
-                
+
                 # Validate data length
                 if ($encryptedBytes.Length -lt $script:AES_IV_SIZE) {
                     throw "Invalid encrypted data format"
                 }
-                
+
                 # Extract IV and encrypted bytes
                 $iv = New-Object byte[] $script:AES_IV_SIZE
                 $dataBytes = New-Object byte[] ($encryptedBytes.Length - $script:AES_IV_SIZE)
-                
+
                 [System.Array]::Copy($encryptedBytes, 0, $iv, 0, $script:AES_IV_SIZE)
                 [System.Array]::Copy($encryptedBytes, $script:AES_IV_SIZE, $dataBytes, 0, $dataBytes.Length)
-                
+
                 # Create AES decryption
                 $aes = [System.Security.Cryptography.Aes]::Create()
                 $aes.KeySize = $script:AES_KEY_SIZE * 8
@@ -889,21 +889,21 @@ function ConvertTo-SecureStringEnhanced {
                 $aes.IV = $iv
                 $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
                 $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-                
+
                 # Decrypt the data
                 $decryptor = $aes.CreateDecryptor()
                 $plainBytes = $decryptor.TransformFinalBlock($dataBytes, 0, $dataBytes.Length)
-                
+
                 # Convert to string
                 $plainText = [System.Text.Encoding]::UTF8.GetString($plainBytes)
-                
+
                 # Convert to SecureString
                 $secureString = New-Object System.Security.SecureString
                 foreach ($char in $plainText.ToCharArray()) {
                     $secureString.AppendChar($char)
                 }
                 $secureString.MakeReadOnly()
-                
+
                 return $secureString
             }
             catch {
@@ -912,12 +912,12 @@ function ConvertTo-SecureStringEnhanced {
             }
             finally {
                 Clear-SensitiveMemory -Variables ([ref]$plainText, [ref]$plainBytes, [ref]$key)
-                
+
                 if ($decryptor) { $decryptor.Dispose() }
                 if ($aes) { $aes.Dispose() }
             }
         }
-        
+
         # Legacy support for old AES format
         { $_ -eq "AES256" -or $_ -eq $null } {
             Write-Log "Attempting legacy AES decryption" -Level WARNING
@@ -929,7 +929,7 @@ function ConvertTo-SecureStringEnhanced {
                 throw "Failed to decrypt legacy credential. Consider re-saving: $_"
             }
         }
-        
+
         default {
             throw "Unknown encryption method: $($EncryptedData.Method)"
         }
@@ -951,40 +951,40 @@ function Save-ShareCredential {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$Target,
-        
+
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$SharePath,
-        
+
         [Parameter(Mandatory=$true)]
         [ValidateNotNull()]
         [System.Management.Automation.PSCredential]$Credential
     )
-    
+
     try {
         # Validate inputs
         if (-not (Test-SafeFileName -FileName $Target)) {
             throw "Invalid target name. Use only alphanumeric characters, hyphens, underscores, and periods."
         }
-        
+
         # Normalize SharePath
         $SharePath = $SharePath.TrimEnd('\')
-        
+
         Write-Log "Saving credentials for target: $Target" -Level DEBUG
         Write-Log "Share path: $SharePath" -Level DEBUG
-        
+
         # Initialize credential store
         Initialize-CredentialStore | Out-Null
-        
+
         # Check if credential already exists and confirm overwrite
         $credentialFile = Join-Path -Path $script:CredentialStorePath -ChildPath "$Target.cred"
         if ((Test-Path -Path $credentialFile) -and $PSCmdlet.ShouldProcess($Target, "Overwrite existing credential")) {
             Write-Log "Overwriting existing credential for target: $Target" -Level WARNING
         }
-        
+
         # Encrypt password using enhanced method
         $encryptedPassword = ConvertFrom-SecureStringEnhanced -SecureString $Credential.Password
-        
+
         # Create credential object with enhanced metadata
         $credObject = [PSCustomObject]@{
             Target = $Target
@@ -998,18 +998,18 @@ function Save-ShareCredential {
             ComputerName = $env:COMPUTERNAME
             UserDomain = $env:USERDOMAIN
         }
-        
+
         # Save to file with enhanced error handling
         if ($PSCmdlet.ShouldProcess($credentialFile, "Save encrypted credential file")) {
             $credObject | Export-Clixml -Path $credentialFile -Force -ErrorAction Stop
-            
+
             # Set restrictive permissions
             Set-SecurePermissions -Path $credentialFile
-            
+
             Write-Log "Credential saved successfully for target: $Target" -Level SUCCESS -SensitiveData
             return $true
         }
-        
+
         return $false
     }
     catch {
@@ -1031,25 +1031,25 @@ function Get-ShareCredential {
         [ValidateNotNullOrEmpty()]
         [string]$Target
     )
-    
+
     try {
         # Validate target name
         if (-not (Test-SafeFileName -FileName $Target)) {
             throw "Invalid target name format"
         }
-        
+
         $credentialFile = Join-Path -Path $script:CredentialStorePath -ChildPath "$Target.cred"
-        
+
         if (-not (Test-Path -Path $credentialFile)) {
             Write-Log "No credential found for target: $Target" -Level WARNING
             return $null
         }
-        
+
         Write-Log "Retrieving credential for target: $Target" -Level DEBUG
-        
+
         # Import and validate credential data
         $credentialData = Import-Clixml -Path $credentialFile -ErrorAction Stop
-        
+
         # Validate credential structure
         $requiredProperties = @('Target', 'SharePath', 'UserName', 'EncryptedPassword')
         foreach ($prop in $requiredProperties) {
@@ -1057,7 +1057,7 @@ function Get-ShareCredential {
                 throw "Invalid credential file format: missing property '$prop'"
             }
         }
-        
+
         # Check credential age
         if ($credentialData.Created) {
             $credAge = (Get-Date) - [datetime]$credentialData.Created
@@ -1065,7 +1065,7 @@ function Get-ShareCredential {
                 Write-Log "Credential for '$Target' is $([math]::Round($credAge.TotalDays)) days old. Consider updating." -Level WARNING
             }
         }
-        
+
         # Decrypt password based on encryption method
         $securePassword = if ($credentialData.EncryptionMethod -in @('DPAPI', 'AES-MachineKey')) {
             ConvertTo-SecureStringEnhanced -EncryptedData $credentialData.EncryptedPassword
@@ -1082,10 +1082,10 @@ function Get-ShareCredential {
                 throw "Failed to decrypt legacy credential. Please re-save the credential on this system."
             }
         }
-        
+
         # Create PSCredential object
         $psCredential = New-Object System.Management.Automation.PSCredential($credentialData.UserName, $securePassword)
-        
+
         # Return enhanced result object
         $result = [PSCustomObject]@{
             Credential = $psCredential
@@ -1095,12 +1095,12 @@ function Get-ShareCredential {
             Modified = $credentialData.Modified
             Age = if ($credentialData.Created) { (Get-Date) - [datetime]$credentialData.Created } else { $null }
         }
-        
+
         Write-Log "Successfully retrieved credential for target: $Target" -Level SUCCESS -SensitiveData
-        
+
         # Clear sensitive data
         Clear-SensitiveMemory -Variables ([ref]$securePassword)
-        
+
         return $result
     }
     catch {
@@ -1118,20 +1118,20 @@ function Get-SavedCredentials {
     [CmdletBinding()]
     [OutputType([PSCustomObject[]])]
     param()
-    
+
     try {
         if (-not (Test-Path -Path $script:CredentialStorePath)) {
             Write-Log "Credential store does not exist" -Level WARNING
             return @()
         }
-        
+
         $credentialFiles = Get-ChildItem -Path $script:CredentialStorePath -Filter "*.cred" -ErrorAction SilentlyContinue
-        
+
         if (-not $credentialFiles) {
             Write-Log "No saved credentials found" -Level INFO
             return @()
         }
-        
+
         $results = foreach ($file in $credentialFiles) {
             try {
                 $credData = Import-Clixml -Path $file.FullName -ErrorAction Stop
@@ -1149,7 +1149,7 @@ function Get-SavedCredentials {
                 Write-Log "Failed to read credential file '$($file.Name)': $_" -Level WARNING
             }
         }
-        
+
         # Handle PowerShell strict mode - use @() to ensure array
         $resultArray = @($results)
         Write-Log "Found $($resultArray.Count) saved credentials" -Level INFO
@@ -1173,26 +1173,26 @@ function Remove-ShareCredential {
         [ValidateNotNullOrEmpty()]
         [string]$Target
     )
-    
+
     try {
         # Validate target name
         if (-not (Test-SafeFileName -FileName $Target)) {
             throw "Invalid target name format"
         }
-        
+
         $credentialFile = Join-Path -Path $script:CredentialStorePath -ChildPath "$Target.cred"
-        
+
         if (-not (Test-Path -Path $credentialFile)) {
             Write-Log "No credential found for target: $Target" -Level WARNING
             return $false
         }
-        
+
         if ($PSCmdlet.ShouldProcess($Target, "Remove stored credential")) {
             Remove-Item -Path $credentialFile -Force -ErrorAction Stop
             Write-Log "Successfully removed credential for target: $Target" -Level SUCCESS
             return $true
         }
-        
+
         return $false
     }
     catch {
@@ -1217,32 +1217,32 @@ function Test-ShareAccess {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$SharePath,
-        
+
         [System.Management.Automation.PSCredential]$Credential,
-        
+
         [int]$TimeoutSeconds = 30
     )
-    
+
     $tempDrive = $null
-    
+
     try {
         # Normalize and validate share path
         $SharePath = $SharePath.TrimEnd('\')
         if (-not ($SharePath -match '^\\\\[^\\]+\\[^\\]+')) {
             throw "Invalid UNC path format. Expected format: \\server\share"
         }
-        
+
         Write-Log "Testing access to share: $SharePath" -Level DEBUG
-        
+
         # Find available drive letter
-        $driveLetter = [char[]](67..90) | 
-            Where-Object { -not (Get-PSDrive -Name $_ -ErrorAction SilentlyContinue) } | 
+        $driveLetter = [char[]](67..90) |
+            Where-Object { -not (Get-PSDrive -Name $_ -ErrorAction SilentlyContinue) } |
             Select-Object -First 1
-        
+
         if (-not $driveLetter) {
             throw "No available drive letters found for testing"
         }
-        
+
         # Prepare PSDrive parameters
         $params = @{
             Name = $driveLetter
@@ -1250,24 +1250,24 @@ function Test-ShareAccess {
             Root = $SharePath
             ErrorAction = 'Stop'
         }
-        
+
         if ($Credential) {
             $params['Credential'] = $Credential
             Write-Log "Using provided credentials for authentication" -Level DEBUG
         }
-        
+
         # Create PSDrive with timeout
         $job = Start-Job -ScriptBlock {
             param($Params)
             New-PSDrive @Params | Out-Null
             Get-ChildItem -Path "$($Params.Name):\" -ErrorAction Stop | Select-Object -First 10
         } -ArgumentList $params
-        
+
         $result = $job | Wait-Job -Timeout $TimeoutSeconds
-        
+
         if ($result.State -eq 'Completed') {
             $jobErrors = Receive-Job -Job $job -ErrorAction SilentlyContinue -ErrorVariable jobErrorVar
-            
+
             if ($jobErrorVar) {
                 # Check for specific error types
                 $errorMessage = $jobErrorVar[0].ToString()
@@ -1281,25 +1281,25 @@ function Test-ShareAccess {
                     throw "Failed to access share: $errorMessage"
                 }
             }
-            
+
             $items = $jobErrors
             $tempDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
-            
+
             Write-Log "Successfully accessed share: $SharePath" -Level SUCCESS
             Write-Log "Found $($items.Count) items in the root directory" -Level DEBUG
-            
+
             if ($items.Count -gt 0) {
                 Write-Log "Sample items:" -Level DEBUG
                 $itemsOutput = $items | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String
                 Write-Log -Message $itemsOutput.Trim() -Level DEBUG
             }
-            
+
             return $true
         }
         elseif ($result.State -eq 'Failed') {
             $jobError = Receive-Job -Job $job -ErrorAction SilentlyContinue
             $errorDetails = $job.ChildJobs[0].JobStateInfo.Reason.Message
-            
+
             if ($errorDetails -match "Access is denied|credentials|authentication|logon failure") {
                 throw "Authentication failed. Invalid username or password for share '$SharePath'"
             }
@@ -1325,7 +1325,7 @@ function Test-ShareAccess {
             Stop-Job -Job $job -ErrorAction SilentlyContinue
             Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
-        
+
         if ($tempDrive) {
             try {
                 Remove-PSDrive -Name $tempDrive.Name -Force -ErrorAction SilentlyContinue
@@ -1349,37 +1349,37 @@ function Get-NetworkShares {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]$Server,
-        
+
         [System.Management.Automation.PSCredential]$Credential,
-        
+
         [int]$TimeoutSeconds = 30
     )
-    
+
     try {
         # Validate server name/IP
         $Server = $Server.Trim()
         if ([string]::IsNullOrWhiteSpace($Server)) {
             throw "Server name cannot be empty"
         }
-        
+
         Write-Log "Attempting to list shares on server: $Server" -Level INFO
-        
+
         # Test basic connectivity first
         if (-not (Test-Connection -ComputerName $Server -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
             Write-Log "Server '$Server' is not responding to ping" -Level WARNING
         }
-        
+
         # Prepare WMI/CIM parameters
         $params = @{
             ClassName = 'Win32_Share'
             ComputerName = $Server
             ErrorAction = 'Stop'
         }
-        
+
         if ($Credential) {
             $params['Credential'] = $Credential
         }
-        
+
         # Try CIM first (preferred), fall back to WMI
         $shares = $null
         try {
@@ -1395,7 +1395,7 @@ function Get-NetworkShares {
             Write-Log "CIM query failed, falling back to WMI: $_" -Level DEBUG
             $shares = Get-WmiObject @params
         }
-        
+
         if ($shares) {
             $shareList = $shares | ForEach-Object {
                 [PSCustomObject]@{
@@ -1416,12 +1416,12 @@ function Get-NetworkShares {
                     MaxUsers = $_.MaximumAllowed
                 }
             } | Sort-Object Name
-            
+
             Write-Log "Found $($shareList.Count) shares on server: $Server" -Level SUCCESS
-            
+
             # Display results
             $shareList | Format-Table -AutoSize | Out-String | Write-Log -Level INFO
-            
+
             return $shareList
         }
         else {
@@ -1447,18 +1447,18 @@ function Get-NetworkShares {
 function Clear-ModuleState {
     [CmdletBinding()]
     param()
-    
+
     try {
         Write-Log "Performing module cleanup" -Level DEBUG
-        
+
         # Clear sensitive variables
         $script:LogFile = $null
-        
+
         # Force garbage collection
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
         [System.GC]::Collect()
-        
+
         Write-Log "Module cleanup completed" -Level DEBUG
     }
     catch {

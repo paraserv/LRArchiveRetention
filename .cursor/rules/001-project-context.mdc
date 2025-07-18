@@ -1,6 +1,6 @@
 ---
 description: "Core project context with server information, development workflow, and safety guidance"
-globs: 
+globs:
 alwaysApply: true
 ---
 # Project Context

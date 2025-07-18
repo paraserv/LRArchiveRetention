@@ -1,6 +1,6 @@
 ---
 description: "Step-by-step workflow templates for deployment, maintenance, and troubleshooting tasks"
-globs: 
+globs:
 alwaysApply: false
 ---
 # Workflow Templates

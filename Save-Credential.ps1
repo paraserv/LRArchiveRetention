@@ -49,7 +49,7 @@
 .NOTES
     This script requires the ShareCredentialHelper module to be present in the modules subdirectory.
     The credentials are encrypted using AES-256 encryption and stored securely on the local machine.
-    
+
     SECURITY: Use -UseStdin parameter for secure automation to prevent password exposure in process lists.
 #>
 
@@ -99,7 +99,7 @@ if ($Quiet) {
 try {
     # Import the helper module
     $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'modules\ShareCredentialHelper.psm1'
-    
+
     if (-not (Test-Path -Path $modulePath -PathType Leaf)) {
         throw "Required module not found at '$modulePath'. Ensure the ShareCredentialHelper.psm1 file exists in the 'modules' subdirectory."
     }
@@ -139,15 +139,15 @@ try {
         if (-not $Quiet) {
             Write-Host "Reading password from stdin..." -ForegroundColor Yellow
         }
-        
+
         $stdinPassword = [Console]::ReadLine()
         if ([string]::IsNullOrWhiteSpace($stdinPassword)) {
             throw "No password provided via stdin. Please pipe the password to this script."
         }
-        
+
         $securePassword = ConvertTo-SecureString -String $stdinPassword -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential($UserName, $securePassword)
-        
+
         # Clear the plain text password immediately
         $stdinPassword = $null
         [System.GC]::Collect()
@@ -159,7 +159,7 @@ try {
         }
         $securePassword = ConvertTo-SecureString -String $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential($UserName, $securePassword)
-        
+
         # Clear the plain text password immediately
         $Password = $null
         [System.GC]::Collect()
@@ -190,14 +190,14 @@ try {
         $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
         $plainTextPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-        
+
         if ([string]::IsNullOrWhiteSpace($plainTextPassword)) {
             # Clear the password from memory
             $plainTextPassword = $null
             [System.GC]::Collect()
             throw "Password cannot be empty. Please provide a valid password."
         }
-        
+
         # Clear the password from memory immediately
         $plainTextPassword = $null
         [System.GC]::Collect()
@@ -207,7 +207,7 @@ try {
     Write-Verbose "Testing credentials against share: $SharePath"
     # $testResult = Test-ShareAccess -SharePath $SharePath -Credential $credential -TimeoutSeconds 15
     $testResult = $true # Temporarily skip validation
-    
+
     if (-not $testResult) {
         if (-not $Quiet) {
             Write-Host "FAILED: Credential validation failed" -ForegroundColor Red
@@ -220,7 +220,7 @@ try {
         }
         exit 1
     }
-    
+
     if (-not $Quiet) {
         Write-Host "SUCCESS: Credentials validated successfully" -ForegroundColor Green
     }
@@ -229,7 +229,7 @@ try {
     if ($PSCmdlet.ShouldProcess($CredentialTarget, "Save encrypted credentials")) {
         # Save the credential using the helper module
         $result = Save-ShareCredential -Target $CredentialTarget -SharePath $SharePath -Credential $credential
-        
+
         if ($result) {
             if (-not $Quiet) {
                 Write-Host "SUCCESS: Credentials saved successfully for target: $CredentialTarget" -ForegroundColor Green
@@ -256,7 +256,7 @@ finally {
         $credential = $null
     }
     [System.GC]::Collect()
-    
+
     # Remove the imported module to clean up memory (suppress verbose output)
     if (Get-Module -Name ShareCredentialHelper -ErrorAction SilentlyContinue) {
         $oldInformationPreference = $InformationPreference

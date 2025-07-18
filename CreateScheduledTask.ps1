@@ -9,25 +9,25 @@
 param(
     [Parameter(Mandatory=$false)]
     [string]$ScriptPath = "C:\LogRhythm\Scripts\ArchiveV2\ArchiveRetention.ps1",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$ArchivePath,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$CredentialTarget,
-    
+
     [Parameter(Mandatory=$false)]
     [int]$RetentionDays = 365,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$ServiceAccount,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$TaskName = "LogRhythm Archive Retention",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Schedule = "Daily",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$StartTime = "03:00"
 )
@@ -88,29 +88,29 @@ if ($CredentialTarget) {
 try {
     Write-Host "`nCreating scheduled task..." -ForegroundColor Green
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description $Description
-    
+
     Write-Host "Successfully created scheduled task: $TaskName" -ForegroundColor Green
     Write-Host ""
-    
+
     # Display task information
     $TaskInfo = Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo
     $Task = Get-ScheduledTask -TaskName $TaskName
-    
+
     Write-Host "=== Task Details ===" -ForegroundColor Cyan
     Write-Host "Task Name: $($Task.TaskName)" -ForegroundColor White
     Write-Host "State: $($Task.State)" -ForegroundColor White
     Write-Host "Next Run Time: $($TaskInfo.NextRunTime)" -ForegroundColor White
     Write-Host "Description: $($Task.Description)" -ForegroundColor White
-    
+
     Write-Host "`n=== Command Details ===" -ForegroundColor Cyan
     Write-Host "Program: $($Action.Execute)" -ForegroundColor White
     Write-Host "Arguments: $($Action.Arguments)" -ForegroundColor White
     Write-Host "Working Directory: $($Action.WorkingDirectory)" -ForegroundColor White
-    
+
     Write-Host "`nScheduled task created successfully!" -ForegroundColor Green
     Write-Host "You can test it by running: Start-ScheduledTask -TaskName '$TaskName'" -ForegroundColor Yellow
-    
+
 } catch {
     Write-Error "Failed to create scheduled task: $($_.Exception.Message)"
     exit 1
-} 
+}

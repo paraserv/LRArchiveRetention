@@ -67,25 +67,25 @@ Create this PowerShell script to set up the scheduled task:
 param(
     [Parameter(Mandatory=$true)]
     [string]$ScriptPath = "C:\LogRhythm\Scripts\ArchiveRetention\ArchiveRetention.ps1",
-    
+
     [Parameter(Mandatory=$true)]
     [string]$ArchivePath,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$CredentialTarget,
-    
+
     [Parameter(Mandatory=$true)]
     [int]$RetentionDays = 365,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$ServiceAccount,
-    
+
     [Parameter(Mandatory=$false)]
     [string]$TaskName = "LogRhythm Archive Retention",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Schedule = "Weekly",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$StartTime = "02:00"
 )
@@ -120,10 +120,10 @@ if ($ServiceAccount) {
 try {
     Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Automated LogRhythm Archive Retention - Deletes files older than $RetentionDays days"
     Write-Host "Successfully created scheduled task: $TaskName" -ForegroundColor Green
-    
+
     # Display task information
     Get-ScheduledTask -TaskName $TaskName | Format-List TaskName, State, LastRunTime, NextRunTime
-    
+
 } catch {
     Write-Error "Failed to create scheduled task: $($_.Exception.Message)"
     exit 1
@@ -222,7 +222,7 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scri
    ```powershell
    # Domain environment
    New-ADUser -Name "svc_ArchiveRetention" -UserPrincipalName "svc_ArchiveRetention@domain.com" -AccountPassword (ConvertTo-SecureString "ComplexPassword123!" -AsPlainText -Force) -Enabled $true
-   
+
    # Local account (if not domain-joined)
    New-LocalUser -Name "svc_ArchiveRetention" -Password (ConvertTo-SecureString "ComplexPassword123!" -AsPlainText -Force) -PasswordNeverExpires
    ```
@@ -274,7 +274,7 @@ If using SYSTEM account:
    ```powershell
    # Run the scheduled task immediately
    Start-ScheduledTask -TaskName "LogRhythm Archive Retention"
-   
+
    # Monitor execution
    Get-ScheduledTask -TaskName "LogRhythm Archive Retention" | Get-ScheduledTaskInfo
    ```
@@ -310,13 +310,13 @@ $Task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
 if ($Task) {
     $TaskInfo = Get-ScheduledTaskInfo -TaskName $TaskName
-    
+
     Write-Host "=== Archive Retention Task Status ===" -ForegroundColor Cyan
     Write-Host "Task State: $($Task.State)" -ForegroundColor $(if($Task.State -eq 'Ready'){'Green'}else{'Yellow'})
     Write-Host "Last Run Time: $($TaskInfo.LastRunTime)"
     Write-Host "Last Result: $($TaskInfo.LastTaskResult)" -ForegroundColor $(if($TaskInfo.LastTaskResult -eq 0){'Green'}else{'Red'})
     Write-Host "Next Run Time: $($TaskInfo.NextRunTime)"
-    
+
     # Check recent logs
     $LogPath = "C:\LogRhythm\Scripts\ArchiveRetention\script_logs\ArchiveRetention.log"
     if (Test-Path $LogPath) {
@@ -445,4 +445,4 @@ Register-ScheduledTask -TaskName $Config.TaskName -Action $Action -Trigger $Trig
 
 ---
 
-**Author**: Nathan Church, Exabeam Professional Services 
+**Author**: Nathan Church, Exabeam Professional Services

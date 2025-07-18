@@ -1,0 +1,64 @@
+repos:
+  # Built-in pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+
+  # Detect secrets and credentials
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - '--baseline'
+          - '.secrets.baseline'
+          - '--exclude-files'
+          - '.*\.git/.*'
+          - '--exclude-files'
+          - '.*node_modules/.*'
+          - '--exclude-files'
+          - '.*\.venv/.*'
+        exclude: |
+          (?x)^(
+            \.secrets\.baseline|
+            tests/.*\.expected|
+            .*\.lock
+          )$
+
+  # Custom credential scanner for PowerShell and Windows environments
+  - repo: local
+    hooks:
+      - id: check-windows-credentials
+        name: Check for Windows credentials
+        entry: scripts/check-credentials.sh
+        language: script
+        files: \.(ps1|md|py|sh|yaml|yml|json)$
+        exclude: ^scripts/check-.*\.sh$
+
+  # PowerShell specific checks
+  - repo: local
+    hooks:
+      - id: check-powershell-secrets
+        name: Check PowerShell scripts for secrets
+        entry: scripts/check-powershell-secrets.sh
+        language: script
+        files: \.ps1$
+
+  # Documentation checks for exposed credentials
+  - repo: local
+    hooks:
+      - id: check-docs-credentials
+        name: Check documentation for exposed credentials
+        entry: scripts/check-docs-credentials.sh
+        language: script
+        files: \.(md|txt|rst)$
+        exclude: ^(scripts/.*\.sh|docs/pre-commit-security-setup\.md)$

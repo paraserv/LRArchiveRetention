@@ -17,8 +17,17 @@ This document provides step-by-step instructions for connecting to Windows Serve
 - **Production**: `winsrv{XX}` (e.g., winsrv01, winsrv02)
 
 ### Credentials
-- **Service Account**: `svc_logrhythm` / `logrhythm!1`
-- **Local Administrator**: `Administrator` / `logrhythm!1`
+- **Service Account**: `svc_logrhythm@LAB.PARASERV.COM` (password stored in macOS keychain)
+- **Local Administrator**: `Administrator` (password stored in macOS keychain)
+
+> **Security Note**: Passwords are stored securely in macOS keychain. Use the following commands to store them:
+> ```bash
+> # Store service account password (run once)
+> security add-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w
+>
+> # Store administrator password (run once)
+> security add-internet-password -s "windev01.lab.paraserv.com" -a "Administrator" -w
+> ```
 
 ## SSH Connectivity (Recommended)
 
@@ -60,8 +69,8 @@ ssh windev01 'powershell -Command "Get-ChildItem -Path C:\ -Directory | Select-O
 windev01
 
 # PowerShell version
-Name        Version       
-----        -------       
+Name        Version
+----        -------
 ConsoleHost 5.1.20348.3932
 
 # Directory listing should show folders like: inetpub, LR, PerfLogs, etc.
@@ -87,8 +96,8 @@ pip install pywinrm pykerberos
 ### Get Kerberos Ticket
 
 ```bash
-# Get authentication ticket (password: logrhythm!1)
-echo "logrhythm!1" | kinit svc_logrhythm@LAB.PARASERV.COM
+# Get authentication ticket (password from keychain)
+echo "$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)" | kinit svc_logrhythm@LAB.PARASERV.COM
 
 # Verify ticket
 klist
@@ -98,11 +107,22 @@ klist
 
 ```python
 import winrm
+import subprocess
+
+# Get password from keychain
+def get_windows_password():
+    result = subprocess.run([
+        'security', 'find-internet-password',
+        '-s', 'windev01.lab.paraserv.com',
+        '-a', 'svc_logrhythm@LAB.PARASERV.COM',
+        '-w'
+    ], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
 
 # HTTPS connection with Kerberos authentication
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                       transport='kerberos', 
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
+                       transport='kerberos',
                        server_cert_validation='ignore')
 
 # Test basic command
@@ -184,9 +204,9 @@ ssh windev01 'powershell -Command "Test-NetConnection -ComputerName 10.20.1.7 -P
 import winrm
 
 # Create session once, reuse for multiple commands
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
-                       transport='kerberos', 
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
+                       transport='kerberos',
                        server_cert_validation='ignore')
 
 # Check PowerShell version

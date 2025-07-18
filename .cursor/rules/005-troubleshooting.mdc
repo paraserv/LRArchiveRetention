@@ -1,6 +1,6 @@
 ---
 description: "Common connectivity issues and troubleshooting guidance for SSH and Windows connections"
-globs: 
+globs:
 alwaysApply: false
 ---
 # Troubleshooting Guide

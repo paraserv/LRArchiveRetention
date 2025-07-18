@@ -1,6 +1,6 @@
 ---
 description: "Git operations and commands for version control of the ArchiveRetention project"
-globs: 
+globs:
 alwaysApply: false
 ---
 # Git Operations
