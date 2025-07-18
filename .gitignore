@@ -44,6 +44,12 @@ ehthumbs.db
 # Cache directory
 __pycache__/
 
+# Python virtual environments
+winrm_env/
+venv/
+env/
+.venv/
+
 # Local development files
 .env
 *.local
