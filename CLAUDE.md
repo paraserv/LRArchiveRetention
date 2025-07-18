@@ -75,6 +75,59 @@ print(f'Path exists: {result.std_out.decode().strip()}')
 ssh windev01 "powershell -Command 'Get-Host'"
 ```
 
+## Authentication & Connectivity
+
+### Windows Server Access (windev01)
+
+**SSH Access** (Preferred for interactive work):
+```bash
+# Uses ~/.ssh/config entry for windev01
+ssh windev01
+# Connects to: Administrator@10.20.1.20 with key: ~/.ssh/windows_server
+```
+
+**WinRM Access** (Preferred for PowerShell automation):
+```python
+import winrm
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman', 
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', 'logrhythm!1'), 
+                       transport='kerberos', 
+                       server_cert_validation='ignore')
+# Service account password: logrhythm!1 (default test password)
+```
+
+### NAS Access (10.20.1.7)
+
+**Credential Retrieval from macOS Keychain**:
+```bash
+# Get NAS username (always 'sanghanas')
+security find-internet-password -s "10.20.1.7" -a "sanghanas"
+
+# Get NAS password securely
+NAS_PASSWORD=$(security find-internet-password -s "10.20.1.7" -a "sanghanas" -w)
+```
+
+**Setting up NAS_CREDS on Windows Server**:
+```powershell
+# On Windows server, save the credential (use actual password from keychain)
+cd C:\LR\Scripts\LRArchiveRetention
+.\Save-Credential.ps1 -Target "NAS_CREDS" -SharePath "\\10.20.1.7\LRArchives" -UserName "sanghanas" -Password "ACTUAL_PASSWORD" -Quiet
+```
+
+**Verification**:
+```powershell
+# Test the saved credential
+Import-Module .\modules\ShareCredentialHelper.psm1
+Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
+```
+
+### Key Connection Details
+- **Windows Server**: windev01.lab.paraserv.com (10.20.1.20)
+- **NAS Server**: 10.20.1.7 (QNAP)
+- **NAS Share**: \\10.20.1.7\LRArchives
+- **NAS Username**: sanghanas (stored in macOS Keychain)
+- **Script Location**: C:\LR\Scripts\LRArchiveRetention\
+
 ## Architecture
 
 ### Core Components
