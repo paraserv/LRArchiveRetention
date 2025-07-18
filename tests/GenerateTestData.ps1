@@ -351,7 +351,7 @@ Write-Host "This may take several hours for large datasets. Progress updates eve
 Write-Host
 
 # Initial progress display
-Show-DetailedProgress -ProcessedFolders 0 -TotalFolders $FolderArray.Length -ProcessedFiles 0 -TotalEstimatedFiles $TotalEstimatedFiles -Force
+Show-DetailedProgress -ProcessedFolders 0 -TotalFolders $FolderArray.Length -ProcessedFiles 0 -TotalEstimatedFiles $TotalEstimatedFiles -Force $true
 
 for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $BatchSize) {
     $batchEnd = [Math]::Min($batchStart + $BatchSize - 1, $FolderArray.Length - 1)
@@ -441,7 +441,7 @@ for ($batchStart = 0; $batchStart -lt $FolderArray.Length; $batchStart += $Batch
 }
 
 # Final progress update
-Show-DetailedProgress -ProcessedFolders $ProcessedFolders -TotalFolders $FolderArray.Length -ProcessedFiles $ProcessedFiles -TotalEstimatedFiles $TotalEstimatedFiles -Force
+Show-DetailedProgress -ProcessedFolders $ProcessedFolders -TotalFolders $FolderArray.Length -ProcessedFiles $ProcessedFiles -TotalEstimatedFiles $TotalEstimatedFiles -Force $true
 
 # Final statistics
 $EndTime = Get-Date
