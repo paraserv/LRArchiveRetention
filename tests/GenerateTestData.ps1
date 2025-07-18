@@ -279,22 +279,34 @@ if (($freeSpace -ne $null -and $totalDisk -ne $null) -or $maxAllowedBytes -ne $n
             Write-Host "Not enough disk space for the requested test set! Attempting to auto-scale..." -ForegroundColor Red
         }
         $avgFileSize = ($MaxFileSizeMB * 1024 * 1024 / 2)
-        $maxFiles = [math]::Floor($limitBytes / ($avgFileSize * (1 + $safetyMargin)))
-        if ($maxFiles -lt 1) {
+        $totalFilesAllowed = [math]::Floor($limitBytes / ($avgFileSize * (1 + $safetyMargin)))
+        if ($totalFilesAllowed -lt 1) {
             Write-Host "ERROR: Not enough space to generate even a single file under the specified constraints." -ForegroundColor Red
             exit 1
         }
+        
         $origFolderCount = $FolderCount
         $origMaxFiles = $MaxFiles
-        if ($maxFiles -lt ($FolderCount * $MinFiles)) {
-            $FolderCount = [math]::Max([math]::Floor($maxFiles / $MinFiles), 1)
-            $MaxFiles = $MinFiles
+        
+        # Try to maintain the user's intended MinFiles-MaxFiles range
+        # First, see if we can fit with reduced folder count but keeping file range
+        $avgFilesPerFolder = ($MinFiles + $MaxFiles) / 2
+        $idealFolderCount = [math]::Floor($totalFilesAllowed / $avgFilesPerFolder)
+        
+        if ($idealFolderCount -ge 1) {
+            # We can maintain the file range, just reduce folder count
+            $FolderCount = [math]::Min($idealFolderCount, $FolderCount)
+            # Keep MaxFiles in original range
         } else {
-            $MaxFiles = [math]::Max([math]::Floor($maxFiles / $FolderCount), $MinFiles)
+            # Extreme case: need to reduce both folders and files per folder
+            $FolderCount = [math]::Max([math]::Floor($totalFilesAllowed / $MinFiles), 1)
+            $maxFilesPerFolder = [math]::Floor($totalFilesAllowed / $FolderCount)
+            $MaxFiles = [math]::Max([math]::Min($maxFilesPerFolder, $MaxFiles), $MinFiles)
         }
         Write-Host "Auto-scaled parameters:" -ForegroundColor Yellow
         Write-Host "  FolderCount: $FolderCount (was $origFolderCount)" -ForegroundColor White
-        Write-Host "  MaxFiles: $MaxFiles (was $origMaxFiles)" -ForegroundColor White
+        Write-Host "  MaxFiles: $MaxFiles (was $origMaxFiles, range: $MinFiles-$origMaxFiles)" -ForegroundColor White
+        Write-Host "  Total files allowed: $([math]::Round($totalFilesAllowed/1000,0))K (based on $([math]::Round($limitBytes/1GB,1))GB limit)" -ForegroundColor Gray
         $estimatedTotalFiles = $FolderCount * [math]::Round(($MinFiles + $MaxFiles) / 2)
         $estimatedTotalBytes = $estimatedTotalFiles * $avgFileSize
         $requiredSpace = $estimatedTotalBytes * (1 + $safetyMargin)
