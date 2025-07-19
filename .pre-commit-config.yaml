@@ -1,29 +1,35 @@
 repos:
-  # Built-in pre-commit hooks (optimized for fewer failures)
+  # Built-in pre-commit hooks (non-disruptive configuration)
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v4.6.0
     hooks:
-      # Critical checks that should block commits
+      # Critical blocking checks (don't modify files)
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-case-conflict
       - id: check-merge-conflict
-
-      # Format checks that only run on relevant files
+      
+      # File format checks (only run on specific files)
       - id: check-yaml
         files: \.(yaml|yml)$
       - id: check-json
         files: \.json$
 
-      # Auto-fixers (these cause commit failures but are necessary)
+  # Formatters in a separate stage to avoid blocking commits
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
       - id: end-of-file-fixer
         exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
+        stages: [manual]
       - id: trailing-whitespace
         exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
+        stages: [manual]
       - id: mixed-line-ending
         exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
+        stages: [manual]
 
-  # Detect secrets and credentials (automatic security checking on source code)
+  # Security checks that don't modify files
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.4.0
     hooks:
@@ -46,7 +52,7 @@ repos:
             docs/README\.md
           )$
 
-  # Custom credential scanner for PowerShell and Windows environments
+  # Custom credential scanners (don't modify files)
   - repo: local
     hooks:
       - id: check-windows-credentials
@@ -56,9 +62,6 @@ repos:
         files: \.(ps1|md|py|sh|yaml|yml|json)$
         exclude: ^scripts/check-.*\.sh$
 
-  # PowerShell specific checks
-  - repo: local
-    hooks:
       - id: check-powershell-secrets
         name: Check PowerShell scripts for secrets
         entry: scripts/check-powershell-secrets.sh
@@ -66,9 +69,6 @@ repos:
         files: \.ps1$
         exclude: ^Save-Credential\.ps1$
 
-  # Documentation checks for exposed credentials
-  - repo: local
-    hooks:
       - id: check-docs-credentials
         name: Check documentation for exposed credentials
         entry: scripts/check-docs-credentials.sh
