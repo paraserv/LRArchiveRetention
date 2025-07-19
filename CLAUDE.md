@@ -49,18 +49,25 @@ cd tests && bash RunArchiveRetentionTests.sh
 
 **PREFERRED: Use WinRM for all PowerShell operations** (session persistence, clean syntax, enterprise authentication)
 
+**IMPORTANT**: Always use timeout mechanisms to prevent hanging commands.
+
 ```bash
 # Activate WinRM environment
 source winrm_env/bin/activate
 
-# WinRM for PowerShell operations (PREFERRED)
-# First, get password from keychain
-WINDOWS_PASSWORD=$(security find-internet-password -s "windev01.lab.paraserv.com" -a "svc_logrhythm@LAB.PARASERV.COM" -w)
+# WinRM for PowerShell operations (PREFERRED) - with timeout protection
+# Recommended timeouts: 5s for simple commands, 10s for file ops, 30-60s for scripts
 
-python3 -c "
-import winrm, os
+# Simple operations (5-10 second timeout)
+timeout 10 python3 -c "
+import winrm, subprocess
+
+def get_windows_password():
+    result = subprocess.run(['security', 'find-internet-password', '-s', 'windev01.lab.paraserv.com', '-a', 'svc_logrhythm@LAB.PARASERV.COM', '-w'], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
 session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
-                       auth=('svc_logrhythm@LAB.PARASERV.COM', os.environ['WINDOWS_PASSWORD']),
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
                        transport='kerberos',
                        server_cert_validation='ignore')
 
@@ -69,8 +76,8 @@ result = session.run_ps('Get-Host | Select-Object Name, Version')
 print(result.std_out.decode().strip())
 
 # Example: Session persistence - variables persist between commands
-session.run_ps('$testPath = \"D:\\LogRhythmArchives\"')
-result = session.run_ps('Test-Path $testPath')
+session.run_ps('\\$testPath = \"D:\\\\LogRhythmArchives\"')
+result = session.run_ps('Test-Path \\$testPath')
 print(f'Path exists: {result.std_out.decode().strip()}')
 "
 
@@ -266,6 +273,26 @@ The main script uses PowerShell parameter sets:
 - **PREFERRED**: WinRM for all PowerShell operations (session persistence, clean syntax, Kerberos auth)
 - **FALLBACK**: SSH for simple commands when WinRM unavailable
 - **TESTING**: Use WinRM for complex test scenarios and script execution
+
+### Performance & Timeout Guidelines
+
+**Script Performance (ArchiveRetention.ps1)**:
+- **Startup time**: ~0.6 seconds
+- **Logging initialization**: Very fast
+- **3-year retention calculation**: 1095 days (cutoff: 2022-07-20)
+- **Configuration validation**: Immediate
+
+**Recommended WinRM Timeouts**:
+- Simple commands (hostname, Test-Path): 5-10 seconds
+- File operations (Get-ChildItem): 10 seconds
+- Script execution: 30-60 seconds
+- Large data operations: 2-5 minutes maximum
+
+**Timeout Implementation**:
+```bash
+# Use bash timeout to prevent hanging
+timeout 10 python3 -c "your_winrm_code_here"
+```
 
 ## Production Deployment
 

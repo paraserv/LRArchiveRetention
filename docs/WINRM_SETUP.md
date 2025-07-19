@@ -107,11 +107,12 @@ klist
 
 ## WinRM Connection Testing
 
-### 1. Basic Connection Test
+### 1. Basic Connection Test with Timeout Protection
+
+**IMPORTANT**: Always use timeout mechanisms to prevent hanging commands.
 
 ```python
 import winrm
-import os
 import subprocess
 
 # Get password from keychain
@@ -121,7 +122,7 @@ def get_windows_password():
         '-s', 'windev01.lab.paraserv.com',
         '-a', 'svc_logrhythm@LAB.PARASERV.COM',
         '-w'
-    ], capture_output=True, text=True)
+    ], capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 # Create WinRM session
@@ -133,6 +134,31 @@ session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
 # Test basic command
 result = session.run_cmd('hostname')
 print(f'Connected to: {result.std_out.decode().strip()}')
+```
+
+### Using Bash Timeout for Complex Operations
+
+For complex operations or commands that might hang, use bash timeout:
+
+```bash
+# Use timeout command to prevent hanging (5-10 seconds for most operations)
+source winrm_env/bin/activate && timeout 10 python3 -c "
+import winrm
+import subprocess
+
+def get_windows_password():
+    result = subprocess.run(['security', 'find-internet-password', '-s', 'windev01.lab.paraserv.com', '-a', 'svc_logrhythm@LAB.PARASERV.COM', '-w'], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('svc_logrhythm@LAB.PARASERV.COM', get_windows_password()),
+                       transport='kerberos',
+                       server_cert_validation='ignore')
+
+print('Testing connection...')
+result = session.run_ps('Get-Host | Select-Object Name, Version')
+print(result.std_out.decode().strip())
+"
 ```
 
 ### 2. PowerShell Command Test
@@ -246,6 +272,42 @@ klist
 
 # Test network connectivity
 nc -zv windev01.lab.paraserv.com 5986
+
+# Test with timeout to prevent hanging
+timeout 5 python3 -c "import winrm; print('WinRM import successful')"
+```
+
+## Performance and Timeout Guidelines
+
+### Recommended Timeout Values
+
+- **Simple commands** (hostname, version check): 5 seconds
+- **File operations** (Test-Path, Get-ChildItem): 10 seconds
+- **Script execution** (ArchiveRetention.ps1): 30-60 seconds
+- **Large data operations**: 2-5 minutes maximum
+
+### Script Performance Findings
+
+Based on testing with ArchiveRetention.ps1:
+
+- **Script startup**: ~0.6 seconds
+- **Logging initialization**: Very fast
+- **Configuration validation**: Immediate
+- **Network path access**: Depends on authentication setup
+- **3-year retention calculation**: 1095 days (cutoff: 2022-07-20)
+
+### Timeout Implementation Patterns
+
+```bash
+# Pattern 1: Direct timeout with error handling
+source winrm_env/bin/activate && timeout 10 python3 -c "
+# Your WinRM code here
+" || echo "Command timed out or failed"
+
+# Pattern 2: Multiple quick operations
+timeout 5 python3 -c "# Quick test"
+timeout 10 python3 -c "# Medium operation"
+timeout 30 python3 -c "# Complex operation"
 ```
 
 ## Notes
