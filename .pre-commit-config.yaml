@@ -13,7 +13,7 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
 
-  # Detect secrets and credentials
+  # Detect secrets and credentials (baseline managed manually to prevent commit loops)
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.4.0
     hooks:
@@ -27,6 +27,7 @@ repos:
           - '.*node_modules/.*'
           - '--exclude-files'
           - '.*\.venv/.*'
+        stages: [manual]  # Only run manually, not on every commit
         exclude: |
           (?x)^(
             \.secrets\.baseline|
