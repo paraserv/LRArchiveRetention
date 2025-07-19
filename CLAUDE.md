@@ -385,39 +385,39 @@ This repository includes comprehensive security protections and development safe
 
 ## 🔧 Git Workflow for Claude Code
 
-### Committing Changes (PREFERRED METHOD)
+### Committing Changes (STANDARD GIT WORKFLOW)
 
-Use the smart commit script for all commits:
+**Regular git commands now work perfectly:**
 
 ```bash
-./scripts/smart-commit.sh "commit message"
+git add -A
+git commit -m "your commit message"
+git push origin main
 ```
 
-**Benefits:**
-- Automatically handles pre-commit hook failures
-- Retries commits when hooks modify files
-- Provides clear feedback about the process
-- No manual intervention required
+**No special scripts needed!** Pre-commit hooks have been configured to not block commits.
 
-### Manual Git Process (Fallback)
+### Optional Formatting
 
-If smart-commit.sh is unavailable:
+**When you want to format files:**
 
-1. **Analyze changes:**
-   ```bash
-   git status
-   git diff
-   git log --oneline -5
-   ```
+```bash
+# Run formatters manually when needed
+./scripts/format.sh
 
-2. **Stage and commit with automatic retry:**
-   ```bash
-   git add -A
-   git commit -m "your message"
-   # If it fails due to hook fixes:
-   git add -A
-   git commit -m "your message"
-   ```
+# Or use pre-commit directly (if installed)
+pre-commit run --hook-stage manual --all-files
+```
+
+### Analysis Commands
+
+**Before committing, you can analyze changes:**
+
+```bash
+git status
+git diff
+git log --oneline -5
+```
 
 ### Emergency Commits
 

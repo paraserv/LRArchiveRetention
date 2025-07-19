@@ -1,26 +1,23 @@
 # Git Workflow Guide
 
-## Improved Commit Process
+## ✅ Standard Git Workflow (FIXED!)
 
-The repository now includes smart commit scripts to handle pre-commit hook failures gracefully.
+**Pre-commit hooks have been reconfigured to not block commits. Regular git commands now work perfectly!**
 
-### Smart Commit (Recommended)
-
-Use this for normal commits. It automatically handles pre-commit hook failures:
+### Normal Commits (Recommended)
 
 ```bash
-# Usage
-./scripts/smart-commit.sh "your commit message"
-
-# Example
-./scripts/smart-commit.sh "fix: update documentation"
+# Standard git workflow - no special scripts needed!
+git add -A
+git commit -m "your commit message"
+git push origin main
 ```
 
-**What it does:**
-1. Stages all changes
-2. Attempts commit with pre-commit hooks
-3. If hooks modify files (causing failure), it automatically re-stages and commits again
-4. Provides clear feedback about the process
+**What happens:**
+1. Security checks run (detect secrets, credentials, etc.)
+2. File validation runs (YAML, JSON syntax)
+3. **Formatters don't run** (moved to manual stage)
+4. Commit succeeds without retries!
 
 ### Quick Commit (Emergency Only)
 
