@@ -84,6 +84,10 @@ def test_archive_retention_nas():
     """Test ArchiveRetention.ps1 with NAS credentials"""
     session = create_session()
 
+    # Clean any lock files first
+    print("Cleaning lock files...")
+    clean_lock_files(session)
+
     # Test with NAS credentials
     command = r'& "C:\LR\Scripts\LRArchiveRetention\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays 1095 -QuietMode'
 
@@ -99,6 +103,54 @@ def test_archive_retention_nas():
         print(result['stderr'])
 
     return result['exit_code'] == 0
+
+def run_nas_dry_run(retention_days=456):
+    """Run dry-run against NAS with specified retention period"""
+    session = create_session()
+
+    # Clean any lock files first
+    print("Cleaning lock files...")
+    clean_lock_files(session)
+
+    # Dry run with progress monitoring
+    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30'
+
+    print(f"Running NAS dry-run with {retention_days} days retention...")
+    result = run_powershell(session, command, timeout=300)  # 5-minute timeout for NAS operations
+
+    print(f"Exit code: {result['exit_code']}")
+    if result['stdout']:
+        print("STDOUT:")
+        print(result['stdout'])
+    if result['stderr']:
+        print("STDERR:")
+        print(result['stderr'])
+
+    return result
+
+def run_nas_execute(retention_days=456):
+    """Execute actual deletion against NAS with specified retention period"""
+    session = create_session()
+
+    # Clean any lock files first
+    print("Cleaning lock files...")
+    clean_lock_files(session)
+
+    # Execute with progress monitoring
+    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -Execute -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30'
+
+    print(f"EXECUTING NAS deletion with {retention_days} days retention...")
+    result = run_powershell(session, command, timeout=600)  # 10-minute timeout for execution
+
+    print(f"Exit code: {result['exit_code']}")
+    if result['stdout']:
+        print("STDOUT:")
+        print(result['stdout'])
+    if result['stderr']:
+        print("STDERR:")
+        print(result['stderr'])
+
+    return result
 
 def test_new_parameters():
     """Test the new v1.2.0 progress parameters"""
@@ -127,23 +179,32 @@ def test_new_parameters():
 def main():
     """Main function to run tests"""
     if len(sys.argv) < 2:
-        print("Usage: python3 winrm_helper.py <test_type>")
-        print("test_type: local, nas, parameters")
+        print("Usage: python3 winrm_helper.py <test_type> [retention_days]")
+        print("test_type: local, nas, parameters, nas_dry_run, nas_execute")
+        print("retention_days: optional, defaults to 456 (15 months)")
         sys.exit(1)
 
     test_type = sys.argv[1]
+    retention_days = int(sys.argv[2]) if len(sys.argv) > 2 else 456
 
     if test_type == "local":
         success = test_archive_retention_local()
+        sys.exit(0 if success else 1)
     elif test_type == "nas":
         success = test_archive_retention_nas()
+        sys.exit(0 if success else 1)
     elif test_type == "parameters":
         success = test_new_parameters()
+        sys.exit(0 if success else 1)
+    elif test_type == "nas_dry_run":
+        result = run_nas_dry_run(retention_days)
+        sys.exit(0 if result['exit_code'] == 0 else 1)
+    elif test_type == "nas_execute":
+        result = run_nas_execute(retention_days)
+        sys.exit(0 if result['exit_code'] == 0 else 1)
     else:
         print(f"Unknown test type: {test_type}")
         sys.exit(1)
-
-    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
