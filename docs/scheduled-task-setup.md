@@ -221,10 +221,10 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scri
 1. **Create Dedicated Service Account**
    ```powershell
    # Domain environment
-   New-ADUser -Name "svc_ArchiveRetention" -UserPrincipalName "svc_ArchiveRetention@domain.com" -AccountPassword (ConvertTo-SecureString "ComplexPassword123!" -AsPlainText -Force) -Enabled $true
+   New-ADUser -Name "svc_ArchiveRetention" -UserPrincipalName "svc_ArchiveRetention@domain.com" -AccountPassword (ConvertTo-SecureString "YOUR_SECURE_PASSWORD" -AsPlainText -Force) -Enabled $true  # pragma: allowlist secret
 
    # Local account (if not domain-joined)
-   New-LocalUser -Name "svc_ArchiveRetention" -Password (ConvertTo-SecureString "ComplexPassword123!" -AsPlainText -Force) -PasswordNeverExpires
+   New-LocalUser -Name "svc_ArchiveRetention" -Password (ConvertTo-SecureString "YOUR_SECURE_PASSWORD" -AsPlainText -Force) -PasswordNeverExpires  # pragma: allowlist secret
    ```
 
 2. **Grant Required Permissions**

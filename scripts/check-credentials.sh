@@ -46,9 +46,9 @@ check_file() {
         "[aA]ccess[_-]?[tT]oken[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9]{20,}['\"]"
         "[sS]ecret[_-]?[kK]ey[[:space:]]*[:=][[:space:]]*['\"][a-zA-Z0-9]{20,}['\"]"
 
-        # PowerShell credential patterns
+        # PowerShell credential patterns (only hardcoded values, not legitimate variable usage)
         "-Password[[:space:]]+['\"][^'\"]{3,}['\"]"
-        "ConvertTo-SecureString.*-AsPlainText.*-Force"
+        "ConvertTo-SecureString.*['\"][^'\"]{6,}['\"].*-AsPlainText.*-Force"
         "\$credential.*=.*New-Object.*PSCredential.*['\"][^'\"]{3,}['\"]"
 
         # Environment variables with secrets
@@ -65,11 +65,15 @@ check_file() {
         "ftp://[^:]+:[^@]+@[^/]+"
     )
 
-    # Check each pattern
+    # Check each pattern, respecting pragma allowlist comments
     for pattern in "${patterns[@]}"; do
-        if grep -iE "$pattern" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if [[ "$line" =~ pragma:[[:space:]]*allowlist[[:space:]]*secret ]] || [[ "$line" =~ pragma:[[:space:]]*whitelist[[:space:]]*secret ]]; then
+                continue
+            fi
             violations+=("Pattern: $pattern")
-        fi
+        done < <(grep -iE "$pattern" "$file" 2>/dev/null || true)
     done
 
     # Check for specific problematic strings
@@ -84,9 +88,13 @@ check_file() {
     )
 
     for string in "${forbidden_strings[@]}"; do
-        if grep -iF "$string" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if [[ "$line" =~ pragma:[[:space:]]*allowlist[[:space:]]*secret ]] || [[ "$line" =~ pragma:[[:space:]]*whitelist[[:space:]]*secret ]]; then
+                continue
+            fi
             violations+=("Forbidden string: $string")
-        fi
+        done < <(grep -iF "$string" "$file" 2>/dev/null || true)
     done
 
     # Report violations

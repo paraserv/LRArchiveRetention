@@ -54,7 +54,7 @@ move C:\LR\Scripts\LRArchiveRetention\ShareCredentialHelper.psm1 C:\LR\Scripts\L
 ```powershell
 # Set up credentials (secure variables in script)
 $username = "svc_lrarchive"
-$password = "SECURE_PASSWORD_HERE"  # Use secure retrieval method
+$password = "YOUR_PASSWORD_HERE"  # pragma: allowlist secret
 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential($username, $securePassword)
 

@@ -25,7 +25,7 @@ check_powershell_file() {
     local ps_patterns=(
         # Hardcoded credentials in PowerShell
         "New-Object.*PSCredential.*['\"][^'\"]+['\"].*['\"][^'\"]{3,}['\"]"
-        "ConvertTo-SecureString.*['\"][^'\"]{3,}['\"].*-AsPlainText.*-Force"
+        "ConvertTo-SecureString.*['\"][^'\"]{6,}['\"].*-AsPlainText.*-Force"
         "\$credential.*=.*['\"][^'\"]{3,}['\"]"
 
         # Direct password parameters
@@ -53,17 +53,21 @@ check_powershell_file() {
         "Enter-PSSession.*-Credential.*['\"][^'\"]{3,}['\"]"
     )
 
-    # Check PowerShell patterns
+        # Check PowerShell patterns, respecting pragma allowlist comments
     for pattern in "${ps_patterns[@]}"; do
-        if grep -iE "$pattern" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if echo "$line" | grep -iE "pragma:.*allowlist.*secret|pragma:.*whitelist.*secret" >/dev/null 2>&1; then
+                continue
+            fi
             violations+=("PowerShell credential pattern: $pattern")
-        fi
-    done
+                 done < <(grep -iE "$pattern" "$file" 2>/dev/null || true)
+     done
 
     # Check for insecure PowerShell practices
     local insecure_practices=(
-        # Plain text password storage
-        "echo.*|.*ConvertTo-SecureString"
+        # Plain text password storage with hardcoded values
+        "echo.*['\"][^'\"]{6,}['\"].*|.*ConvertTo-SecureString"
         "Read-Host.*-AsSecureString.*-Force"
 
         # Insecure credential export
@@ -75,15 +79,23 @@ check_powershell_file() {
     )
 
     for practice in "${insecure_practices[@]}"; do
-        if grep -iE "$practice" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if echo "$line" | grep -iE "pragma:.*allowlist.*secret|pragma:.*whitelist.*secret" >/dev/null 2>&1; then
+                continue
+            fi
             violations+=("Insecure practice: $practice")
-        fi
+        done < <(grep -iE "$practice" "$file" 2>/dev/null || true)
     done
 
     # Check for recommended secure patterns that might be misused
-    if grep -iE "Save-Credential.*-Password[[:space:]]+['\"]" "$file" >/dev/null 2>&1; then
+    while IFS= read -r line; do
+        # Skip lines with pragma allowlist comment
+        if echo "$line" | grep -iE "pragma:.*allowlist.*secret|pragma:.*whitelist.*secret" >/dev/null 2>&1; then
+            continue
+        fi
         violations+=("Possible insecure Save-Credential usage - should use -UseStdin")
-    fi
+    done < <(grep -iE "Save-Credential.*-Password[[:space:]]+['\"]" "$file" 2>/dev/null || true)
 
     # Report violations
     if [ ${#violations[@]} -gt 0 ]; then

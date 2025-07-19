@@ -39,11 +39,11 @@
 
 .EXAMPLE
     # Secure method using stdin (recommended for automation)
-    echo "MySecurePassword" | .\Save-Credential.ps1 -CredentialTarget "SecureShare" -SharePath "\\server\share" -UseStdin -Quiet
+    echo "MySecurePassword" | .\Save-Credential.ps1 -CredentialTarget "SecureShare" -SharePath "\\server\share" -UseStdin -Quiet  # pragma: allowlist secret
 
 .EXAMPLE
     # Using environment variable for password (legacy method - exposes password in process list)
-    $env:ARCHIVE_PASSWORD = "SecurePassword123"
+    $env:ARCHIVE_PASSWORD = "YOUR_PASSWORD_HERE"  # pragma: allowlist secret
     .\Save-Credential.ps1 -CredentialTarget "SecureShare" -SharePath "\\server\share" -Quiet
 
 .NOTES

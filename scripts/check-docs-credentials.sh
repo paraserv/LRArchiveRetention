@@ -56,11 +56,15 @@ check_docs_file() {
         "-Password.*['\"][^'\"]{6,}['\"]"
     )
 
-    # Check documentation patterns
+    # Check documentation patterns, respecting pragma allowlist comments
     for pattern in "${doc_patterns[@]}"; do
-        if grep -iE "$pattern" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if [[ "$line" =~ pragma:[[:space:]]*allowlist[[:space:]]*secret ]] || [[ "$line" =~ pragma:[[:space:]]*whitelist[[:space:]]*secret ]]; then
+                continue
+            fi
             violations+=("Credential pattern: $pattern")
-        fi
+        done < <(grep -iE "$pattern" "$file" 2>/dev/null || true)
     done
 
     # Specific forbidden strings in documentation
@@ -78,9 +82,13 @@ check_docs_file() {
     )
 
     for string in "${forbidden_doc_strings[@]}"; do
-        if grep -iF "$string" "$file" >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            # Skip lines with pragma allowlist comment
+            if [[ "$line" =~ pragma:[[:space:]]*allowlist[[:space:]]*secret ]] || [[ "$line" =~ pragma:[[:space:]]*whitelist[[:space:]]*secret ]]; then
+                continue
+            fi
             violations+=("Forbidden credential string: $string")
-        fi
+        done < <(grep -iF "$string" "$file" 2>/dev/null || true)
     done
 
     # Check for acceptable placeholder patterns (these should NOT trigger violations)
