@@ -382,3 +382,73 @@ This repository includes comprehensive security protections and development safe
 - macOS keychain integration for secure credential storage
 
 **Setup & Documentation**: For complete security framework setup instructions, troubleshooting, and best practices, see [`docs/pre-commit-security-setup.md`](docs/pre-commit-security-setup.md).
+
+## 🔧 Git Workflow for Claude Code
+
+### Committing Changes (PREFERRED METHOD)
+
+Use the smart commit script for all commits:
+
+```bash
+./scripts/smart-commit.sh "commit message"
+```
+
+**Benefits:**
+- Automatically handles pre-commit hook failures
+- Retries commits when hooks modify files
+- Provides clear feedback about the process
+- No manual intervention required
+
+### Manual Git Process (Fallback)
+
+If smart-commit.sh is unavailable:
+
+1. **Analyze changes:**
+   ```bash
+   git status
+   git diff
+   git log --oneline -5
+   ```
+
+2. **Stage and commit with automatic retry:**
+   ```bash
+   git add -A
+   git commit -m "your message"
+   # If it fails due to hook fixes:
+   git add -A
+   git commit -m "your message"
+   ```
+
+### Emergency Commits
+
+For critical fixes when pre-commit hooks are blocking:
+
+```bash
+./scripts/quick-commit.sh "emergency fix message"
+# Remember to run: pre-commit run --all-files
+```
+
+**⚠️ Warning:** Only use for emergencies - bypasses all security checks!
+
+### Push Commands
+
+After successful commits:
+
+```bash
+git push origin main
+```
+
+### Troubleshooting Pre-commit Issues
+
+```bash
+# Run hooks manually to debug
+pre-commit run --all-files
+
+# Update hook versions
+pre-commit autoupdate
+
+# Clear hook cache
+pre-commit clean
+```
+
+See [`docs/git-workflow.md`](docs/git-workflow.md) for complete documentation.
