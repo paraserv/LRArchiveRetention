@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![PowerShell](https://img.shields.io/badge/powershell-5.1%2B-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey.svg)
-![License](https://img.shields.io/badge/license-proprietary-red.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 Enterprise-grade PowerShell solution for automated cleanup of LogRhythm Inactive Archive files (.lca) with comprehensive network share support, secure credential management, and production-validated reliability.
 
