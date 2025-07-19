@@ -14,7 +14,15 @@ COMMIT_MSG="$1"
 
 echo "🚀 Smart Commit: Starting commit process..."
 
-# Stage all changes
+# Format files first to prevent common hook failures
+echo "🔧 Pre-formatting files to prevent hook failures..."
+if [[ -f "./scripts/format-files.sh" ]]; then
+    ./scripts/format-files.sh
+else
+    echo "⚠️  format-files.sh not found, skipping pre-formatting"
+fi
+
+# Stage all changes (including any formatting fixes)
 echo "📁 Staging all changes..."
 git add -A
 
