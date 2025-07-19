@@ -190,6 +190,19 @@ Once a credential has been saved using `Save-Credential.ps1`, you can reference 
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🔐 Security & Development
+
+This project includes comprehensive security protections:
+
+- **Pre-commit security hooks** prevent credential exposure
+- **Secure credential management** via macOS keychain integration
+- **PowerShell security scanning** for anti-patterns
+- **Documentation credential detection** in markdown files
+
+**For Developers**: See `docs/pre-commit-security-setup.md` for complete security framework documentation.
+
+**Security Setup**: Run `./scripts/setup-pre-commit.sh` to enable automated credential protection.
+
 ## Support
 
 Contributions are welcome! Please follow the standard GitHub fork and pull request workflow.

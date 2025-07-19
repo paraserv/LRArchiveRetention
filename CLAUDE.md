@@ -133,7 +133,8 @@ NAS_PASSWORD=$(security find-internet-password -s "10.20.1.7" -a "sanghanas" -w)
 ```powershell
 # On Windows server, save the credential (use actual password from keychain)
 cd C:\LR\Scripts\LRArchiveRetention
-.\Save-Credential.ps1 -Target "NAS_CREDS" -SharePath "\\10.20.1.7\LRArchives" -UserName "sanghanas" -Password "YOUR_NAS_PASSWORD" -Quiet
+.\Save-Credential.ps1 -Target "NAS_CREDS" -SharePath "\\10.20.1.7\LRArchives" -UserName "sanghanas" -UseStdin -Quiet
+# Enter the actual password when prompted (retrieved from keychain)
 ```
 
 **Verification**:
@@ -263,3 +264,48 @@ The main script uses PowerShell parameter sets:
 - Enable audit logging for compliance
 - Regular credential rotation (system warns after 365 days)
 - Test in non-production environment first
+
+## 🔐 Pre-Commit Security Framework
+
+This repository includes a comprehensive pre-commit security system to prevent credential exposure and maintain security standards.
+
+### Security Protection Features
+
+**Automated Credential Detection**:
+- Blocks hardcoded passwords, API keys, and connection strings before commit
+- PowerShell-specific credential anti-pattern detection
+- Documentation scanning for exposed secrets
+- Industry-standard `detect-secrets` integration
+
+**Security Scanners**:
+- `scripts/check-credentials.sh` - General credential patterns
+- `scripts/check-powershell-secrets.sh` - PowerShell-specific checks
+- `scripts/check-docs-credentials.sh` - Documentation credential scanning
+
+### Setup and Usage
+
+**Quick Setup**:
+```bash
+# Run the automated setup script
+./scripts/setup-pre-commit.sh
+```
+
+**Manual Setup**:
+```bash
+# Install dependencies
+pipx install pre-commit detect-secrets
+
+# Install hooks
+pre-commit install
+
+# Test the system
+pre-commit run --all-files
+```
+
+**Documentation**: See `docs/pre-commit-security-setup.md` for complete setup instructions, troubleshooting, and best practices.
+
+**Security Notes**:
+- All credentials must use macOS keychain storage (never hardcoded)
+- Pre-commit hooks automatically prevent credential exposure
+- Baseline configuration allows legitimate patterns while blocking real secrets
+- Smart exclusions prevent scanners from flagging their own detection patterns
