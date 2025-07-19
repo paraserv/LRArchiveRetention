@@ -106,6 +106,24 @@ param(
     [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "File types to include (e.g., '.lca').")]
     [string[]]$IncludeFileTypes = @('.lca'),
 
+    # --- Progress and Performance Parameters ---
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Disable all progress updates for scheduled tasks (optimizes performance).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Disable all progress updates for scheduled tasks (optimizes performance).")]
+    [switch]$QuietMode,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Show progress during file scanning phase.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Show progress during file scanning phase.")]
+    [switch]$ShowScanProgress,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Show real-time deletion progress counters.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Show real-time deletion progress counters.")]
+    [switch]$ShowDeleteProgress,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Progress update interval in seconds (default: 30, 0 = disable).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Progress update interval in seconds (default: 30, 0 = disable).")]
+    [ValidateRange(0, 300)]
+    [int]$ProgressInterval = 30,
+
     # --- Help Parameter ---
     [Parameter(ParameterSetName = 'Help')]
     [switch]$Help
@@ -243,7 +261,7 @@ function Complete-ScriptExecution {
 # Module import moved to the credential handling section below
 
 # Script version (single source of truth)
-$SCRIPT_VERSION = '1.1.0'
+$SCRIPT_VERSION = '1.2.0'
 
 # Show help if no parameters are provided or -Help is used
 if ($Help -or $MyInvocation.BoundParameters.Count -eq 0) {
@@ -1119,13 +1137,34 @@ try {
 
     # Count files that would be processed
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
+
+    $scanStartTime = Get-Date
     try {
+        if ($ShowScanProgress -and $script:showProgress) {
+            Write-Host "  Enumerating files..." -ForegroundColor Cyan
+        }
+
         $allFiles = Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction Stop
+
+        if ($ShowScanProgress -and $script:showProgress) {
+            Write-Host "  Found $($allFiles.Count) total files, filtering by type and date..." -ForegroundColor Cyan
+        }
+
         if ($IncludeFileTypes -and $IncludeFileTypes.Count -gt 0) {
             $allFiles = $allFiles | Where-Object { $IncludeFileTypes -contains ([System.IO.Path]::GetExtension($_.Name).ToLower()) }
+
+            if ($ShowScanProgress -and $script:showProgress) {
+                Write-Host "  After type filtering: $($allFiles.Count) files" -ForegroundColor Cyan
+            }
         }
+
         # Only include files older than the cutoff date
         $allFiles = $allFiles | Where-Object { $_.LastWriteTime -lt $cutoffDate }
+
+        $scanDuration = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
+        if ($ShowScanProgress -and $script:showProgress) {
+            Write-Host "  Scan completed in $scanDuration seconds" -ForegroundColor Cyan
+        }
     } catch {
         $errMsg = "CRITICAL: Unable to enumerate files in path: $ArchivePath. Error: $($_.Exception.Message)"
         Write-Log $errMsg -Level FATAL
@@ -1146,7 +1185,15 @@ try {
 
     # Initialize progress tracking variables
     $script:lastProgressUpdate = Get-Date
-    $script:progressUpdateInterval = [TimeSpan]::FromSeconds(30)
+
+    # Configure progress interval based on parameters
+    if ($QuietMode -or $ProgressInterval -eq 0) {
+        $script:progressUpdateInterval = [TimeSpan]::MaxValue  # Effectively disable progress updates
+        $script:showProgress = $false
+    } else {
+        $script:progressUpdateInterval = [TimeSpan]::FromSeconds($ProgressInterval)
+        $script:showProgress = $true
+    }
     $processedCount = 0
     $processedSize = 0
     $errorCount = 0
@@ -1184,19 +1231,31 @@ try {
         $processedCount++
         $script:processedCount = $processedCount
         $script:processedSize = $processedSize
-        $now = Get-Date
-        $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
-        if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
-            $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
-            $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
-            $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
-            Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) at $elapsedSeconds seconds run-time" -Level INFO
-            $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
-            Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
-            Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
-            Write-Log "  Rate: $rate" -Level INFO
-            Write-Log "  Estimated time remaining: $eta" -Level INFO
-            $script:lastProgressUpdate = $now
+        # Progress reporting (only if enabled)
+        if ($script:showProgress) {
+            $now = Get-Date
+            $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
+
+            # Show real-time progress if requested
+            if ($ShowDeleteProgress -and ($processedCount % 10 -eq 0)) {
+                $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+                $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+                Write-Host "  Deleted: $processedCount/$($allFiles.Count) files ($percentComplete%) - $processedSizeGB GB" -ForegroundColor Green
+            }
+
+            # Periodic detailed progress updates
+            if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
+                $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+                $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
+                $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
+                Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) at $elapsedSeconds seconds run-time" -Level INFO
+                $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+                Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
+                Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+                Write-Log "  Rate: $rate" -Level INFO
+                Write-Log "  Estimated time remaining: $eta" -Level INFO
+                $script:lastProgressUpdate = $now
+            }
         }
     }
     $processingTime = $null
@@ -1235,14 +1294,33 @@ try {
         Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipDirCleanup switch." -Level INFO
     } else {
         Write-Log "Starting empty directory cleanup under $ArchivePath..." -Level INFO
+        $cleanupStartTime = Get-Date
         try {
-            $emptyDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory | Sort-Object FullName -Descending
+            # Optimized directory enumeration - only get directories that could be empty
+            if ($ShowScanProgress -and $script:showProgress) {
+                Write-Host "  Scanning for empty directories..." -ForegroundColor Cyan
+            }
+
+            # Get all directories, sorted deepest first for efficient cleanup
+            $allDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory -Force | Sort-Object FullName -Descending
             $removedCount = 0
-            foreach ($dir in $emptyDirs) {
+            $checkedCount = 0
+
+            foreach ($dir in $allDirs) {
+                $checkedCount++
+
                 # Never remove the root archive path itself
                 if ($dir.FullName -eq (Resolve-Path $ArchivePath)) { continue }
-                $children = Get-ChildItem -Path $dir.FullName -Force
-                if ($children.Count -eq 0) {
+
+                # Optimized empty check - use faster directory test
+                try {
+                    $isEmpty = @(Get-ChildItem -Path $dir.FullName -Force -ErrorAction Stop).Count -eq 0
+                } catch {
+                    # Skip directories we can't access
+                    continue
+                }
+
+                if ($isEmpty) {
                     if ($Execute) {
                         try {
                             Remove-Item -Path $dir.FullName -Force -ErrorAction Stop
@@ -1256,12 +1334,20 @@ try {
                         $removedCount++
                     }
                 }
+
+                # Show progress for directory cleanup if requested
+                if ($ShowScanProgress -and $script:showProgress -and ($checkedCount % 100 -eq 0)) {
+                    Write-Host "    Checked $checkedCount/$($allDirs.Count) directories, found $removedCount empty" -ForegroundColor Cyan
+                }
             }
+
+            $cleanupDuration = [math]::Round(((Get-Date) - $cleanupStartTime).TotalSeconds, 1)
+
             if ($removedCount -gt 0) {
-                $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run)" }
+                $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath in $cleanupDuration seconds" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run) - scan took $cleanupDuration seconds" }
                 Write-Log $msg -Level INFO
             } else {
-                Write-Log "No empty directories found to remove under $ArchivePath" -Level INFO
+                Write-Log "No empty directories found to remove under $ArchivePath (scanned $checkedCount directories in $cleanupDuration seconds)" -Level INFO
             }
         } catch {
             Write-Log "Error during empty directory cleanup: $($_.Exception.Message)" -Level WARNING
