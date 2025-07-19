@@ -1,17 +1,27 @@
 repos:
-  # Built-in pre-commit hooks
+  # Built-in pre-commit hooks (optimized for fewer failures)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
+      # Critical checks that should block commits
       - id: check-added-large-files
         args: ['--maxkb=1000']
       - id: check-case-conflict
       - id: check-merge-conflict
+
+      # Format checks that only run on relevant files
       - id: check-yaml
+        files: \.(yaml|yml)$
       - id: check-json
+        files: \.json$
+
+      # Auto-fixers (these cause commit failures but are necessary)
       - id: end-of-file-fixer
+        exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
       - id: trailing-whitespace
+        exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
       - id: mixed-line-ending
+        exclude: ^(\.git/|node_modules/|\.venv/|winrm_env/)
 
   # Detect secrets and credentials (automatic security checking on source code)
   - repo: https://github.com/Yelp/detect-secrets
