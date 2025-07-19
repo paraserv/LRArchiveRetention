@@ -6,6 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a PowerShell-based LogRhythm Archive Retention Manager for automated cleanup of LogRhythm Inactive Archive files (.lca). It provides enterprise-grade file retention management with secure credential handling, comprehensive logging, and safety features.
 
+**Current Version**: See [VERSION](VERSION) file
+**Documentation**: [README.md](README.md) | [CHANGELOG.md](CHANGELOG.md) | [Technical Docs](docs/)
+
 ## Key Commands
 
 ### Development & Testing
@@ -185,7 +188,7 @@ Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
 
 ## ✅ Verified Working Patterns (to prevent repeated troubleshooting)
 
-### Production Testing Results (v1.2.0) - July 19, 2025
+### Production Testing Results (v2.0.0) - July 19, 2025
 
 **Large-Scale NAS Operation Validation**:
 ```bash
@@ -218,7 +221,7 @@ python3 winrm_helper.py nas_dry_run 456  # Dry-run with custom retention
 python3 winrm_helper.py nas_execute 456  # Execute with custom retention
 ```
 
-**New Progress Parameters** (v1.2.0+):
+**New Progress Parameters** (v2.0.0+):
 - `-QuietMode`: Eliminates ALL progress output for scheduled tasks (optimal performance)
 - `-ShowScanProgress`: Shows "Scanning for empty directories..." and file enumeration progress
 - `-ShowDeleteProgress`: Real-time deletion counters every 10 files

@@ -1,0 +1,30 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# PowerShell scripts should have CRLF line endings on Windows
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+
+# Python files should have LF line endings
+*.py text eol=lf
+
+# Documentation files
+*.md text eol=lf
+*.txt text eol=lf
+
+# Configuration files
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary files
+*.exe binary
+*.dll binary
+*.zip binary
+*.7z binary
+
+# Log files (generated)
+*.log text eol=crlf
+
+# Version file
+VERSION text eol=lf

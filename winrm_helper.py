@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 WinRM Helper Script for LRArchiveRetention
-Eliminates escape sequence issues and standardizes timeout discipline
+Production-ready utility for reliable remote PowerShell operations
+
+Version: See VERSION file
+Documentation: README_winrm_helper.md
 """
 import winrm
 import subprocess
@@ -176,15 +179,39 @@ def test_new_parameters():
 
     return result['exit_code'] == 0
 
+def get_version():
+    """Get version from VERSION file"""
+    try:
+        with open('VERSION', 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "2.0.0"  # Fallback version
+
 def main():
     """Main function to run tests"""
     if len(sys.argv) < 2:
-        print("Usage: python3 winrm_helper.py <test_type> [retention_days]")
-        print("test_type: local, nas, parameters, nas_dry_run, nas_execute")
+        print("LogRhythm Archive Retention WinRM Helper")
+        print(f"Version: {get_version()}")
+        print()
+        print("Usage: python3 winrm_helper.py <command> [retention_days]")
+        print("Commands:")
+        print("  local               - Test with local path")
+        print("  nas                 - Test NAS credentials")
+        print("  parameters          - Test v2.0.0 features")
+        print("  nas_dry_run [days]  - Production dry-run (default: 456 days)")
+        print("  nas_execute [days]  - Production execution (default: 456 days)")
+        print("  version             - Show version information")
+        print()
         print("retention_days: optional, defaults to 456 (15 months)")
         sys.exit(1)
 
     test_type = sys.argv[1]
+
+    if test_type == "version":
+        print(f"WinRM Helper Version: {get_version()}")
+        print("Part of LogRhythm Archive Retention Manager")
+        sys.exit(0)
+
     retention_days = int(sys.argv[2]) if len(sys.argv) > 2 else 456
 
     if test_type == "local":

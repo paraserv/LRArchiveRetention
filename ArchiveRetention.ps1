@@ -260,8 +260,12 @@ function Complete-ScriptExecution {
 # Import credential helper module (only when needed)
 # Module import moved to the credential handling section below
 
-# Script version (single source of truth)
-$SCRIPT_VERSION = '1.2.0'
+# Script version (read from VERSION file)
+$SCRIPT_VERSION = if (Test-Path "$PSScriptRoot\VERSION") {
+    (Get-Content "$PSScriptRoot\VERSION" -Raw).Trim()
+} else {
+    "2.0.0"  # Fallback version
+}
 
 # Show help if no parameters are provided or -Help is used
 if ($Help -or $MyInvocation.BoundParameters.Count -eq 0) {

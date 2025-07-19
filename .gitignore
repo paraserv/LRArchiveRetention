@@ -1,61 +1,75 @@
-# Log files
-*.log
+# Generated log directories (contains operational data)
+script_logs/
+retention_actions/
 
-# Cache files
-*.cache
-*.json
+# Credential storage (contains sensitive encrypted data)
+CredentialStore/
+*.cred
+
+# Python virtual environment
+winrm_env/
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Generated log files
+*.log
 
 # Temporary files
 *.tmp
 *.temp
+*.swp
+*.swo
+*~
 
-# PowerShell modules
-#*.psd1
-#*.psm1
-
-# VS Code settings
-.vscode/
-
-# Windows files
+# Windows specific
 Thumbs.db
 ehthumbs.db
+Desktop.ini
 
-# Mac OS files
+# macOS specific
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# IDE specific files
+# IDE files
+.vscode/
 .idea/
+*.sublime-*
 *.suo
 *.user
 *.userosscache
 *.sln.docstates
 
-# User-specific files
-*.userprefs
-
-# Localization files
-*.resx
-
-# Test data and reports
+# Test data and outputs
+test_data/
 /TestResults/
 /tests/TestData/
 /tests/CredentialStore/
+generation_*.txt
+generation_*.log
 
-# Cache directory
-__pycache__/
+# PowerShell transcripts and help files
+PowerShell_transcript.*.txt
+*.help.txt
 
-# Python virtual environments
-winrm_env/
-venv/
-env/
-.venv/
-
-# Local development files
+# Configuration files with potential secrets
 .env
+.env.local
+.env.*.local
 *.local
 
-# PowerShell help files
-*.help.txt
+# Backup files
+*.bak
+*.backup
+
+# Lock files
+*.lock
 
 # Archive files
 *.zip
@@ -63,7 +77,29 @@ env/
 *.gz
 *.tar
 
-# Backup files
-*.bak
-*.swp
-*~
+# Coverage and testing
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Cache files (but keep JSON configs)
+*.cache

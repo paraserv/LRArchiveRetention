@@ -1,5 +1,9 @@
 # ArchiveRetention.ps1 - Improvement Roadmap
 
+**Current Version**: See [VERSION](VERSION) file
+**Release Notes**: [CHANGELOG.md](CHANGELOG.md)
+**Main Documentation**: [README.md](README.md)
+
 ## High Priority - Production Efficiency
 
 ### 1. QuietMode Parameter (`-QuietMode`)
@@ -82,7 +86,7 @@
 - **Directory Cleanup**: Performance bottleneck identified
 - **Network Optimization**: Single-threaded operations limit throughput
 
-## ✅ COMPLETED IMPLEMENTATIONS (v1.2.0)
+## ✅ COMPLETED IMPLEMENTATIONS (v2.0.0)
 
 ### High Priority Features - DONE
 1. **✅ QuietMode Parameter (`-QuietMode`)** - Implemented and tested

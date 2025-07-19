@@ -42,7 +42,7 @@ python3 winrm_helper.py local
 # Test NAS credential authentication
 python3 winrm_helper.py nas
 
-# Test v1.2.0 progress parameters
+# Test v2.0.0 progress parameters
 python3 winrm_helper.py parameters
 ```
 
@@ -138,7 +138,7 @@ tail -f C:\LR\Scripts\LRArchiveRetention\script_logs\ArchiveRetention.log
 
 ## Version Compatibility
 
-- **ArchiveRetention.ps1**: v1.2.0+ (required for progress parameters)
+- **ArchiveRetention.ps1**: v2.0.0+ (semantic versioning)
 - **Python**: 3.7+ (tested with 3.9+)
 - **WinRM**: pywinrm library required
 - **PowerShell**: 5.1+ on target Windows server
