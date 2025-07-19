@@ -8,7 +8,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$ScriptPath = "C:\LogRhythm\Scripts\ArchiveV2\ArchiveRetention.ps1",
+    [string]$ScriptPath = "C:\LR\Scripts\LRArchiveRetention\ArchiveRetention.ps1",
 
     [Parameter(Mandatory=$false)]
     [string]$ArchivePath,
@@ -43,13 +43,13 @@ if ($ArchivePath -and $CredentialTarget) {
     exit 1
 }
 
-# Build the PowerShell command
+# Build the PowerShell command with QuietMode for optimal scheduled task performance
 if ($CredentialTarget) {
-    $Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$ScriptPath' -CredentialTarget '$CredentialTarget' -RetentionDays $RetentionDays -Execute`""
+    $Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$ScriptPath' -CredentialTarget '$CredentialTarget' -RetentionDays $RetentionDays -Execute -QuietMode`""
     Write-Host "Setting up scheduled task with credential target: $CredentialTarget" -ForegroundColor Cyan
 } else {
     # For UNC paths, we need to be careful with escaping - use double quotes around the path in the command
-    $Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$ScriptPath' -ArchivePath `"$ArchivePath`" -RetentionDays $RetentionDays -Execute`""
+    $Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$ScriptPath' -ArchivePath `"$ArchivePath`" -RetentionDays $RetentionDays -Execute -QuietMode`""
     Write-Host "Setting up scheduled task with archive path: $ArchivePath" -ForegroundColor Cyan
 }
 
