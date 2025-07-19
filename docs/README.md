@@ -192,16 +192,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔐 Security & Development
 
-This project includes comprehensive security protections:
-
-- **Pre-commit security hooks** prevent credential exposure
-- **Secure credential management** via macOS keychain integration
-- **PowerShell security scanning** for anti-patterns
-- **Documentation credential detection** in markdown files
-
-**For Developers**: See `docs/pre-commit-security-setup.md` for complete security framework documentation.
-
-**Security Setup**: Run `./scripts/setup-pre-commit.sh` to enable automated credential protection.
+This project includes comprehensive security protections and development safeguards. For complete security framework documentation, setup instructions, and developer guidelines, see [`docs/pre-commit-security-setup.md`](pre-commit-security-setup.md).
 
 ## Support
 
