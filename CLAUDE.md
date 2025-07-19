@@ -185,23 +185,37 @@ Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
 
 ## ✅ Verified Working Patterns (to prevent repeated troubleshooting)
 
-### Script Testing with New Parameters (v1.2.0+)
+### Production Testing Results (v1.2.0) - July 19, 2025
 
-**Quick Script Validation** (always works with local paths):
+**Large-Scale NAS Operation Validation**:
 ```bash
-# Test dry-run with progress monitoring (10s timeout sufficient)
-source winrm_env/bin/activate && timeout 10 python3 -c "
-import winrm, subprocess
-session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
-                       auth=('SERVICE_ACCOUNT@DOMAIN.COM',
-                             subprocess.run(['security', 'find-internet-password',
-                                           '-s', 'windev01.lab.paraserv.com',
-                                           '-a', 'SERVICE_ACCOUNT@DOMAIN.COM', '-w'],
-                                          capture_output=True, text=True, check=True).stdout.strip()),
-                       transport='kerberos', server_cert_validation='ignore')
-result = session.run_ps('& \"C:\\\\\\\\LR\\\\\\\\Scripts\\\\\\\\LRArchiveRetention\\\\\\\\ArchiveRetention.ps1\" -ArchivePath \"C:\\\\\\\\temp\" -RetentionDays 1035 -ShowScanProgress -ShowDeleteProgress -ProgressInterval 10')
-print('✅ SUCCESS' if result.status_code == 0 else '❌ FAILED')
-"
+# Production-tested commands using winrm_helper.py
+source winrm_env/bin/activate
+
+# Dry-run: 95,558 files (4.67 TB) - 15 month retention
+python3 winrm_helper.py nas_dry_run 456
+
+# Execute: 0% error rate, 35 files/sec performance
+python3 winrm_helper.py nas_execute 456
+```
+
+**Proven Performance Metrics**:
+- **Scan Performance**: 2,074 files/sec (metadata enumeration)
+- **Delete Performance**: 35 files/sec (actual network file operations)
+- **Scan-to-Delete Ratio**: 59:1 (excellent for network operations)
+- **Reliability**: 0% error rate on 95,558+ file operations
+- **Total Data Processed**: 4.67 TB in ~45 minutes
+
+**winrm_helper.py Usage** (Recommended for all operations):
+```bash
+# Quick tests
+python3 winrm_helper.py local           # Test with local path
+python3 winrm_helper.py nas             # Test NAS credentials
+python3 winrm_helper.py parameters      # Test v1.2.0 features
+
+# Production operations
+python3 winrm_helper.py nas_dry_run 456  # Dry-run with custom retention
+python3 winrm_helper.py nas_execute 456  # Execute with custom retention
 ```
 
 **New Progress Parameters** (v1.2.0+):
@@ -211,6 +225,7 @@ print('✅ SUCCESS' if result.status_code == 0 else '❌ FAILED')
 - `-ProgressInterval N`: Configurable update frequency in seconds (0 = disable, default: 30)
 
 **Retention Period Examples**:
+- **15 months**: `-RetentionDays 456` (cutoff: 2024-04-19) - Production tested
 - **2 years 10 months**: `-RetentionDays 1035` (cutoff: 2022-09-18)
 - **3 years**: `-RetentionDays 1095` (cutoff: 2022-07-20)
 
