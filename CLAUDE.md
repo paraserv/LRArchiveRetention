@@ -56,7 +56,8 @@ cd tests && bash RunArchiveRetentionTests.sh
 source winrm_env/bin/activate
 
 # WinRM for PowerShell operations (PREFERRED) - with timeout protection
-# Recommended timeouts: 5s for simple commands, 10s for file ops, 30-60s for scripts
+# CRITICAL: Use appropriate timeouts to prevent hanging - this is a common issue!
+# Recommended timeouts: 5s for simple commands, 5-10s for file ops, 15-60s for scripts
 
 # Simple operations (5-10 second timeout)
 timeout 10 python3 -c "
@@ -181,6 +182,42 @@ Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
 - **NAS Share**: \\10.20.1.7\LRArchives
 - **NAS Username**: sanghanas (stored in macOS Keychain)
 - **Script Location**: C:\LR\Scripts\LRArchiveRetention\
+
+## ✅ Verified Working Patterns (to prevent repeated troubleshooting)
+
+### Script Testing with New Parameters (v1.2.0+)
+
+**Quick Script Validation** (always works with local paths):
+```bash
+# Test dry-run with progress monitoring (15s timeout sufficient)
+source winrm_env/bin/activate && timeout 15 python3 -c "
+import winrm, subprocess
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('SERVICE_ACCOUNT@DOMAIN.COM',
+                             subprocess.run(['security', 'find-internet-password',
+                                           '-s', 'windev01.lab.paraserv.com',
+                                           '-a', 'SERVICE_ACCOUNT@DOMAIN.COM', '-w'],
+                                          capture_output=True, text=True, check=True).stdout.strip()),
+                       transport='kerberos', server_cert_validation='ignore')
+result = session.run_ps('& \"C:\\\\LR\\\\Scripts\\\\LRArchiveRetention\\\\ArchiveRetention.ps1\" -ArchivePath \"C:\\\\temp\" -RetentionDays 1035 -ShowScanProgress -ShowDeleteProgress -ProgressInterval 10')
+print('✅ SUCCESS' if result.status_code == 0 else '❌ FAILED')
+"
+```
+
+**New Progress Parameters** (v1.2.0+):
+- `-QuietMode`: Eliminates ALL progress output for scheduled tasks (optimal performance)
+- `-ShowScanProgress`: Shows "Scanning for empty directories..." and file enumeration progress
+- `-ShowDeleteProgress`: Real-time deletion counters every 10 files
+- `-ProgressInterval N`: Configurable update frequency in seconds (0 = disable, default: 30)
+
+**Retention Period Examples**:
+- **2 years 10 months**: `-RetentionDays 1035` (cutoff: 2022-09-18)
+- **3 years**: `-RetentionDays 1095` (cutoff: 2022-07-20)
+
+### Previous Successful Results
+- **540 files deleted** (25.24 GB) in 96.4 seconds via NAS share
+- **Directory cleanup optimization** with timing and progress indicators
+- **Both dry-run and execute modes** verified working with new parameters
 
 ## Architecture
 

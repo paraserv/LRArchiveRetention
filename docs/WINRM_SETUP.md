@@ -282,8 +282,8 @@ timeout 5 python3 -c "import winrm; print('WinRM import successful')"
 ### Recommended Timeout Values
 
 - **Simple commands** (hostname, version check): 5 seconds
-- **File operations** (Test-Path, Get-ChildItem): 10 seconds
-- **Script execution** (ArchiveRetention.ps1): 30-60 seconds
+- **File operations** (Test-Path, Get-ChildItem): 5-10 seconds
+- **Script execution** (ArchiveRetention.ps1): 15-60 seconds depending on file count
 - **Large data operations**: 2-5 minutes maximum
 
 ### Script Performance Findings
@@ -294,7 +294,33 @@ Based on testing with ArchiveRetention.ps1:
 - **Logging initialization**: Very fast
 - **Configuration validation**: Immediate
 - **Network path access**: Depends on authentication setup
+- **2y10m retention calculation**: 1035 days (cutoff: 2022-09-18)
 - **3-year retention calculation**: 1095 days (cutoff: 2022-07-20)
+
+### Verified Working Approaches
+
+**✅ Successful Script Execution Pattern:**
+```bash
+# Quick dry-run test with new progress parameters (v1.2.0+)
+source winrm_env/bin/activate && timeout 15 python3 -c "
+import winrm, subprocess
+session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
+                       auth=('SERVICE_ACCOUNT@DOMAIN.COM',
+                             subprocess.run(['security', 'find-internet-password',
+                                           '-s', 'windev01.lab.paraserv.com',
+                                           '-a', 'SERVICE_ACCOUNT@DOMAIN.COM', '-w'],
+                                          capture_output=True, text=True, check=True).stdout.strip()),
+                       transport='kerberos', server_cert_validation='ignore')
+result = session.run_ps('& \"C:\\\\LR\\\\Scripts\\\\LRArchiveRetention\\\\ArchiveRetention.ps1\" -ArchivePath \"C:\\\\temp\" -RetentionDays 1035 -ShowScanProgress -ShowDeleteProgress -ProgressInterval 10')
+print('Exit code:', result.status_code)
+"
+```
+
+**✅ Script Parameter Testing (v1.2.0+):**
+- `-QuietMode`: Disables all progress updates for scheduled tasks
+- `-ShowScanProgress`: Shows "Scanning for empty directories..." and file enumeration progress
+- `-ShowDeleteProgress`: Shows real-time deletion counters every 10 files
+- `-ProgressInterval N`: Configurable progress update frequency (0 = disable)
 
 ### Timeout Implementation Patterns
 
