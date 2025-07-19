@@ -393,18 +393,71 @@ function Initialize-CredentialStore {
     try {
         Write-Log "Initializing credential store at: $script:CredentialStorePath" -Level DEBUG
 
-        # Create credential store directory if it doesn't exist
-        if (-not (Test-Path -Path $script:CredentialStorePath)) {
-            $null = New-Item -Path $script:CredentialStorePath -ItemType Directory -Force
-            Write-Log "Created credential store directory" -Level SUCCESS
+        # Check if parent directory exists and is writable
+        $parentPath = Split-Path -Path $script:CredentialStorePath -Parent
+        if (-not (Test-Path -Path $parentPath)) {
+            Write-Log "Parent directory '$parentPath' does not exist. Creating..." -Level INFO
+            try {
+                $null = New-Item -Path $parentPath -ItemType Directory -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Log "Failed to create parent directory '$parentPath': $_" -Level ERROR
+                throw "Cannot create parent directory: $_"
+            }
         }
 
-        # Set secure permissions
-        Set-SecurePermissions -Path $script:CredentialStorePath -IsDirectory
+        # Test write access to parent directory
+        $testFile = Join-Path -Path $parentPath -ChildPath "test_write_$(Get-Random).tmp"
+        try {
+            $null = New-Item -Path $testFile -ItemType File -Force -ErrorAction Stop
+            Remove-Item -Path $testFile -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "No write access to parent directory '$parentPath': $_" -Level ERROR
+            throw "Insufficient permissions to create credential store directory: $_"
+        }
 
-        # Validate directory security
-        if (-not (Test-DirectorySecurity -Path $script:CredentialStorePath)) {
-            Write-Log "Credential store directory security validation failed" -Level WARNING
+        # Create credential store directory if it doesn't exist
+        if (-not (Test-Path -Path $script:CredentialStorePath)) {
+            try {
+                $null = New-Item -Path $script:CredentialStorePath -ItemType Directory -Force -ErrorAction Stop
+                Write-Log "Created credential store directory" -Level SUCCESS
+            }
+            catch {
+                Write-Log "Failed to create credential store directory '$script:CredentialStorePath': $_" -Level ERROR
+                throw "Cannot create credential store directory: $_"
+            }
+        }
+
+        # Set secure permissions (non-fatal if it fails)
+        try {
+            Set-SecurePermissions -Path $script:CredentialStorePath -IsDirectory
+            Write-Log "Set secure permissions on credential store" -Level DEBUG
+        }
+        catch {
+            Write-Log "Failed to set secure permissions (continuing anyway): $_" -Level WARNING
+        }
+
+        # Validate directory security (non-fatal if it fails)
+        try {
+            if (-not (Test-DirectorySecurity -Path $script:CredentialStorePath)) {
+                Write-Log "Credential store directory security validation failed" -Level WARNING
+            }
+        }
+        catch {
+            Write-Log "Failed to validate directory security (continuing anyway): $_" -Level WARNING
+        }
+
+        # Test that we can write to the credential store directory
+        $testCredFile = Join-Path -Path $script:CredentialStorePath -ChildPath "test_write_$(Get-Random).tmp"
+        try {
+            $null = New-Item -Path $testCredFile -ItemType File -Force -ErrorAction Stop
+            Remove-Item -Path $testCredFile -Force -ErrorAction SilentlyContinue
+            Write-Log "Verified write access to credential store directory" -Level DEBUG
+        }
+        catch {
+            Write-Log "Cannot write to credential store directory '$script:CredentialStorePath': $_" -Level ERROR
+            throw "Credential store directory is not writable: $_"
         }
 
         return $true

@@ -288,6 +288,39 @@ $script:startTime = Get-Date
 # Single-instance lock (prevents concurrent executions)
 # -------------------------------------------------------------
 $script:LockFilePath = Join-Path -Path $env:TEMP -ChildPath "ArchiveRetention.lock"
+
+function Test-StaleLock {
+    param([string]$LockFilePath)
+
+    if (-not (Test-Path $LockFilePath)) {
+        return $false
+    }
+
+    try {
+        $lockContent = Get-Content $LockFilePath -ErrorAction Stop
+        if ($lockContent.Count -ge 1) {
+            $lockPID = [int]$lockContent[0]
+            # Check if process is still running
+            if (Get-Process -Id $lockPID -ErrorAction SilentlyContinue) {
+                return $false  # Process still running, lock is valid
+            } else {
+                Write-Log "Detected stale lock file from terminated process $lockPID. Removing..." -Level WARNING
+                Remove-Item -Path $LockFilePath -Force -ErrorAction SilentlyContinue
+                return $true   # Stale lock removed
+            }
+        }
+    }
+    catch {
+        Write-Log "Lock file exists but couldn't read PID. Attempting to remove stale lock..." -Level WARNING
+        Remove-Item -Path $LockFilePath -Force -ErrorAction SilentlyContinue
+        return $true
+    }
+    return $false
+}
+
+# Check for and clean up stale locks first
+Test-StaleLock -LockFilePath $script:LockFilePath | Out-Null
+
 try {
     $script:LockFileStream = [System.IO.FileStream]::new(
         $script:LockFilePath,
@@ -302,8 +335,29 @@ try {
     Write-Log "Acquired single-instance lock ($script:LockFilePath)" -Level DEBUG
 }
 catch [System.IO.IOException] {
-    Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
-    exit 9
+    # Try once more after stale lock cleanup
+    Start-Sleep -Milliseconds 100
+    if (Test-StaleLock -LockFilePath $script:LockFilePath) {
+        try {
+            $script:LockFileStream = [System.IO.FileStream]::new(
+                $script:LockFilePath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+            $pidInfo = [System.Text.Encoding]::UTF8.GetBytes("$PID`n$(Get-Date)")
+            $script:LockFileStream.SetLength(0)
+            $script:LockFileStream.Write($pidInfo, 0, $pidInfo.Length)
+            $script:LockFileStream.Flush()
+            Write-Log "Acquired single-instance lock after stale lock cleanup ($script:LockFilePath)" -Level DEBUG
+        }
+        catch {
+            Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
+            exit 9
+        }
+    } else {
+        Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
+        exit 9
+    }
 }
 
 $tempDriveName = $null

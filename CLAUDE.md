@@ -57,10 +57,10 @@ source winrm_env/bin/activate
 
 # WinRM for PowerShell operations (PREFERRED) - with timeout protection
 # CRITICAL: Use appropriate timeouts to prevent hanging - this is a common issue!
-# Recommended timeouts: 5s for simple commands, 5-10s for file ops, 15-60s for scripts
+# Recommended timeouts: 5s for simple commands, 10s for file ops, 15-30s for scripts
 
-# Simple operations (5-10 second timeout)
-timeout 10 python3 -c "
+# Simple operations (5 second timeout)
+timeout 5 python3 -c "
 import winrm, subprocess
 
 def get_windows_password():
@@ -77,8 +77,8 @@ result = session.run_ps('Get-Host | Select-Object Name, Version')
 print(result.std_out.decode().strip())
 
 # Example: Session persistence - variables persist between commands
-session.run_ps('\\$testPath = \"D:\\\\LogRhythmArchives\"')
-result = session.run_ps('Test-Path \\$testPath')
+session.run_ps('$testPath = \"D:\\LogRhythmArchives\"')
+result = session.run_ps('Test-Path $testPath')
 print(f'Path exists: {result.std_out.decode().strip()}')
 "
 
@@ -160,10 +160,10 @@ session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
                        transport='kerberos', server_cert_validation='ignore')
 
 # Change to script directory
-session.run_ps('cd C:\\LR\\Scripts\\LRArchiveRetention')
+session.run_ps('cd C:\\\\LR\\\\Scripts\\\\LRArchiveRetention')
 
 # Save credential via secure stdin (password never exposed in command line)
-cmd = f'echo \"{os.environ[\"NAS_PASSWORD\"]}\" | .\\Save-Credential.ps1 -Target \"NAS_CREDS\" -SharePath \"\\\\10.20.1.7\\LRArchives\" -UserName \"sanghanas\" -UseStdin -Quiet'
+cmd = f'echo \"{os.environ[\"NAS_PASSWORD\"]}\" | .\\\\Save-Credential.ps1 -Target \"NAS_CREDS\" -SharePath \"\\\\\\\\10.20.1.7\\\\LRArchives\" -UserName \"sanghanas\" -UseStdin -Quiet'
 result = session.run_ps(cmd)
 print('Credential saved successfully' if result.status_code == 0 else f'Error: {result.std_err.decode()}')
 "
@@ -189,8 +189,8 @@ Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
 
 **Quick Script Validation** (always works with local paths):
 ```bash
-# Test dry-run with progress monitoring (15s timeout sufficient)
-source winrm_env/bin/activate && timeout 15 python3 -c "
+# Test dry-run with progress monitoring (10s timeout sufficient)
+source winrm_env/bin/activate && timeout 10 python3 -c "
 import winrm, subprocess
 session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
                        auth=('SERVICE_ACCOUNT@DOMAIN.COM',
@@ -199,7 +199,7 @@ session = winrm.Session('https://windev01.lab.paraserv.com:5986/wsman',
                                            '-a', 'SERVICE_ACCOUNT@DOMAIN.COM', '-w'],
                                           capture_output=True, text=True, check=True).stdout.strip()),
                        transport='kerberos', server_cert_validation='ignore')
-result = session.run_ps('& \"C:\\\\LR\\\\Scripts\\\\LRArchiveRetention\\\\ArchiveRetention.ps1\" -ArchivePath \"C:\\\\temp\" -RetentionDays 1035 -ShowScanProgress -ShowDeleteProgress -ProgressInterval 10')
+result = session.run_ps('& \"C:\\\\\\\\LR\\\\\\\\Scripts\\\\\\\\LRArchiveRetention\\\\\\\\ArchiveRetention.ps1\" -ArchivePath \"C:\\\\\\\\temp\" -RetentionDays 1035 -ShowScanProgress -ShowDeleteProgress -ProgressInterval 10')
 print('✅ SUCCESS' if result.status_code == 0 else '❌ FAILED')
 "
 ```
@@ -320,15 +320,15 @@ The main script uses PowerShell parameter sets:
 - **Configuration validation**: Immediate
 
 **Recommended WinRM Timeouts**:
-- Simple commands (hostname, Test-Path): 5-10 seconds
+- Simple commands (hostname, Test-Path): 5 seconds
 - File operations (Get-ChildItem): 10 seconds
-- Script execution: 30-60 seconds
-- Large data operations: 2-5 minutes maximum
+- Script execution: 15-30 seconds
+- Large data operations: 60-120 seconds maximum
 
 **Timeout Implementation**:
 ```bash
 # Use bash timeout to prevent hanging
-timeout 10 python3 -c "your_winrm_code_here"
+timeout 5 python3 -c "your_winrm_code_here"
 ```
 
 ## Production Deployment
