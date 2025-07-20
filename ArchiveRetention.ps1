@@ -1415,12 +1415,22 @@ try {
     
     # Determine processing mode
     $useStreamingMode = $Execute -and -not $ShowDeleteSummary
+    $useParallelStreaming = $useStreamingMode -and $ParallelProcessing
     
     if ($useStreamingMode) {
-        Write-Log "Using streaming deletion mode for optimal performance on large datasets" -Level INFO
+        if ($useParallelStreaming) {
+            Write-Log "Using PARALLEL streaming deletion mode with $ThreadCount threads for maximum network performance" -Level INFO
+            Write-Log "Files will be processed in batches of $BatchSize as discovered" -Level INFO
+        } else {
+            Write-Log "Using streaming deletion mode for optimal performance on large datasets" -Level INFO
+        }
         Write-Log "Progress updates: Every 1,000 files processed or every 30 seconds (whichever comes first)" -Level INFO
         if ($script:showProgress) {
-            Write-Host "  Streaming mode: Files will be processed as discovered (no pre-scan)" -ForegroundColor Cyan
+            if ($useParallelStreaming) {
+                Write-Host "  Parallel streaming mode: Files processed in batches with $ThreadCount threads" -ForegroundColor Cyan
+            } else {
+                Write-Host "  Streaming mode: Files will be processed as discovered (no pre-scan)" -ForegroundColor Cyan
+            }
             Write-Host "  Progress updates: Every 1,000 files or 30 seconds" -ForegroundColor Gray
         }
     }
@@ -1442,6 +1452,12 @@ try {
             $IncludeFileTypes | ForEach-Object { "*$_" }
         } else {
             @("*.*")
+        }
+        
+        # For parallel streaming, create a batch collection
+        if ($useParallelStreaming) {
+            $streamingBatch = New-Object System.Collections.Generic.List[PSCustomObject]
+            $batchStartTime = Get-Date
         }
         
         foreach ($pattern in $patterns) {
@@ -1475,60 +1491,127 @@ try {
                         $totalSize += $fileInfo.Length
                         
                         if ($useStreamingMode) {
-                            # STREAMING MODE: Process file immediately
-                            try {
-                                Invoke-WithRetry -Operation {
-                                    [System.IO.File]::Delete($fileInfo.FullName)
-                                } -Description "Delete file: $($fileInfo.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
+                            # STREAMING MODE: Process file immediately or batch for parallel
+                            if ($useParallelStreaming) {
+                                # Add to batch for parallel processing
+                                $fileObj = [PSCustomObject]@{
+                                    FullName = $fileInfo.FullName
+                                    Name = $fileInfo.Name
+                                    DirectoryName = $fileInfo.DirectoryName
+                                    LastWriteTime = $fileInfo.LastWriteTime
+                                    CreationTime = $fileInfo.CreationTime
+                                    Length = $fileInfo.Length
+                                    Extension = $fileInfo.Extension
+                                }
+                                $streamingBatch.Add($fileObj)
                                 
-                                # Track parent directory for smart cleanup
-                                $parentDir = $fileInfo.DirectoryName
-                                $modifiedDirectories[$parentDir] = $true
-                                
-                                # Log deletion
-                                Write-Log "Deleted file: $($fileInfo.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
-                                if ($script:DeletionLogWriter) {
-                                    try {
-                                        $script:DeletionLogWriter.WriteLine($fileInfo.FullName)
-                                        $script:DeletionLogWriter.Flush()
-                                    } catch {
-                                        Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
+                                # Process batch when it reaches BatchSize
+                                if ($streamingBatch.Count -ge $BatchSize) {
+                                    Write-Log "Processing parallel streaming batch of $($streamingBatch.Count) files..." -Level DEBUG
+                                    
+                                    # Convert batch to array for processing
+                                    $batchToProcess = $streamingBatch.ToArray()
+                                    $streamingBatch.Clear()
+                                    
+                                    # Process batch in parallel
+                                    $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
+                                    
+                                    # Aggregate results
+                                    $successCount += $batchResult.SuccessCount
+                                    $errorCount += $batchResult.ErrorCount
+                                    $processedSize += $batchResult.ProcessedSize
+                                    $processedCount += $batchToProcess.Count
+                                    
+                                    # Merge modified directories
+                                    foreach ($dir in $batchResult.ModifiedDirectories.Keys) {
+                                        $modifiedDirectories[$dir] = $true
+                                    }
+                                    
+                                    # Progress reporting
+                                    if ($ShowDeleteProgress -and $script:showProgress) {
+                                        Write-Host "      Processed batch: $successCount total files deleted ($([math]::Round($processedSize / 1GB, 2)) GB)..." -ForegroundColor Green
+                                    }
+                                    
+                                    # Periodic progress to main log
+                                    $currentTime = Get-Date
+                                    $timeSinceLastLog = $currentTime - $lastProgressLog
+                                    if ($timeSinceLastLog -gt $progressLogInterval) {
+                                        $elapsedTotal = $currentTime - $scanStartTime
+                                        $rate = if ($elapsedTotal.TotalSeconds -gt 0) { 
+                                            [math]::Round($successCount / $elapsedTotal.TotalSeconds, 1) 
+                                        } else { 0 }
+                                        $scanRate = if ($elapsedTotal.TotalSeconds -gt 0) { 
+                                            [math]::Round($scannedCount / $elapsedTotal.TotalSeconds, 0) 
+                                        } else { 0 }
+                                        
+                                        Write-Log "Parallel streaming progress: Scanned $scannedCount files, deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB freed)" -Level INFO
+                                        Write-Log "  Deletion rate: $rate files/sec, Scan rate: $scanRate files/sec" -Level INFO
+                                        Write-Log "  Running time: $([math]::Round($elapsedTotal.TotalMinutes, 1)) minutes" -Level INFO
+                                        Write-Log "  Using $ThreadCount parallel threads" -Level INFO
+                                        $lastProgressLog = $currentTime
+                                    }
+                                    
+                                    if ($errorCount -gt 100) {
+                                        Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
+                                        throw "Excessive errors during processing"
                                     }
                                 }
-                                
-                                $successCount++
-                                $processedCount++
-                                $processedSize += $fileInfo.Length
-                                
-                                # Show deletion progress
-                                if ($ShowDeleteProgress -and $script:showProgress -and ($successCount % 10 -eq 0)) {
-                                    Write-Host "      Deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB)..." -ForegroundColor Green
-                                }
-                                
-                                # Periodic progress to main log (every 1000 files or 30 seconds)
-                                $currentTime = Get-Date
-                                $timeSinceLastLog = $currentTime - $lastProgressLog
-                                if (($successCount % $progressFileInterval -eq 0) -or ($timeSinceLastLog -gt $progressLogInterval)) {
-                                    $elapsedTotal = $currentTime - $scanStartTime
-                                    $rate = if ($elapsedTotal.TotalSeconds -gt 0) { 
-                                        [math]::Round($successCount / $elapsedTotal.TotalSeconds, 1) 
-                                    } else { 0 }
-                                    $scanRate = if ($elapsedTotal.TotalSeconds -gt 0) { 
-                                        [math]::Round($scannedCount / $elapsedTotal.TotalSeconds, 0) 
-                                    } else { 0 }
+                            } else {
+                                # Sequential streaming (original code)
+                                try {
+                                    Invoke-WithRetry -Operation {
+                                        [System.IO.File]::Delete($fileInfo.FullName)
+                                    } -Description "Delete file: $($fileInfo.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
                                     
-                                    Write-Log "Streaming progress: Scanned $scannedCount files, deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB freed)" -Level INFO
-                                    Write-Log "  Deletion rate: $rate files/sec, Scan rate: $scanRate files/sec" -Level INFO
-                                    Write-Log "  Running time: $([math]::Round($elapsedTotal.TotalMinutes, 1)) minutes" -Level INFO
-                                    $lastProgressLog = $currentTime
+                                    # Track parent directory for smart cleanup
+                                    $parentDir = $fileInfo.DirectoryName
+                                    $modifiedDirectories[$parentDir] = $true
+                                    
+                                    # Log deletion
+                                    Write-Log "Deleted file: $($fileInfo.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
+                                    if ($script:DeletionLogWriter) {
+                                        try {
+                                            $script:DeletionLogWriter.WriteLine($fileInfo.FullName)
+                                            $script:DeletionLogWriter.Flush()
+                                        } catch {
+                                            Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
+                                        }
+                                    }
+                                    
+                                    $successCount++
+                                    $processedCount++
+                                    $processedSize += $fileInfo.Length
+                                    
+                                    # Show deletion progress
+                                    if ($ShowDeleteProgress -and $script:showProgress -and ($successCount % 10 -eq 0)) {
+                                        Write-Host "      Deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB)..." -ForegroundColor Green
+                                    }
+                                    
+                                    # Periodic progress to main log (every 1000 files or 30 seconds)
+                                    $currentTime = Get-Date
+                                    $timeSinceLastLog = $currentTime - $lastProgressLog
+                                    if (($successCount % $progressFileInterval -eq 0) -or ($timeSinceLastLog -gt $progressLogInterval)) {
+                                        $elapsedTotal = $currentTime - $scanStartTime
+                                        $rate = if ($elapsedTotal.TotalSeconds -gt 0) { 
+                                            [math]::Round($successCount / $elapsedTotal.TotalSeconds, 1) 
+                                        } else { 0 }
+                                        $scanRate = if ($elapsedTotal.TotalSeconds -gt 0) { 
+                                            [math]::Round($scannedCount / $elapsedTotal.TotalSeconds, 0) 
+                                        } else { 0 }
+                                        
+                                        Write-Log "Streaming progress: Scanned $scannedCount files, deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB freed)" -Level INFO
+                                        Write-Log "  Deletion rate: $rate files/sec, Scan rate: $scanRate files/sec" -Level INFO
+                                        Write-Log "  Running time: $([math]::Round($elapsedTotal.TotalMinutes, 1)) minutes" -Level INFO
+                                        $lastProgressLog = $currentTime
+                                    }
                                 }
-                            }
-                            catch {
-                                Write-Log "Error deleting file $($fileInfo.FullName): $($_.Exception.Message)" -Level ERROR
-                                $errorCount++
-                                if ($errorCount -gt 100) {
-                                    Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
-                                    throw "Excessive errors during processing"
+                                catch {
+                                    Write-Log "Error deleting file $($fileInfo.FullName): $($_.Exception.Message)" -Level ERROR
+                                    $errorCount++
+                                    if ($errorCount -gt 100) {
+                                        Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
+                                        throw "Excessive errors during processing"
+                                    }
                                 }
                             }
                         }
@@ -1577,11 +1660,20 @@ try {
         $scanDuration = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
         if ($script:showProgress) {
             if ($useStreamingMode) {
-                Write-Host "  Streaming deletion completed: $scannedCount files scanned, $successCount deleted in $scanDuration seconds" -ForegroundColor Cyan
-                if ($successCount -gt 0) {
-                    $deleteRate = if ($scanDuration -gt 0) { [math]::Round($successCount / $scanDuration, 0) } else { 0 }
-                    Write-Host "  Deletion performance: $deleteRate files/second" -ForegroundColor Green
-                    Write-Host "  Total space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -ForegroundColor Green
+                if ($useParallelStreaming) {
+                    Write-Host "  Parallel streaming deletion completed: $scannedCount files scanned, $successCount deleted in $scanDuration seconds" -ForegroundColor Cyan
+                    if ($successCount -gt 0) {
+                        $deleteRate = if ($scanDuration -gt 0) { [math]::Round($successCount / $scanDuration, 0) } else { 0 }
+                        Write-Host "  Deletion performance: $deleteRate files/second (using $ThreadCount threads)" -ForegroundColor Green
+                        Write-Host "  Total space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -ForegroundColor Green
+                    }
+                } else {
+                    Write-Host "  Streaming deletion completed: $scannedCount files scanned, $successCount deleted in $scanDuration seconds" -ForegroundColor Cyan
+                    if ($successCount -gt 0) {
+                        $deleteRate = if ($scanDuration -gt 0) { [math]::Round($successCount / $scanDuration, 0) } else { 0 }
+                        Write-Host "  Deletion performance: $deleteRate files/second" -ForegroundColor Green
+                        Write-Host "  Total space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -ForegroundColor Green
+                    }
                 }
             } else {
                 Write-Host "  System.IO scan completed: $scannedCount total files scanned, $matchedCount matched criteria in $scanDuration seconds" -ForegroundColor Cyan
@@ -1595,6 +1687,33 @@ try {
         Write-Log $errMsg -Level FATAL
         Write-Host $errMsg -ForegroundColor Red
         exit 2
+    }
+    
+    # Process any remaining files in the parallel streaming batch
+    if ($useParallelStreaming -and $streamingBatch -and $streamingBatch.Count -gt 0) {
+        Write-Log "Processing final parallel streaming batch of $($streamingBatch.Count) files..." -Level DEBUG
+        
+        # Convert batch to array for processing
+        $batchToProcess = $streamingBatch.ToArray()
+        $streamingBatch.Clear()
+        
+        # Process batch in parallel
+        $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
+        
+        # Aggregate results
+        $successCount += $batchResult.SuccessCount
+        $errorCount += $batchResult.ErrorCount
+        $processedSize += $batchResult.ProcessedSize
+        $processedCount += $batchToProcess.Count
+        
+        # Merge modified directories
+        foreach ($dir in $batchResult.ModifiedDirectories.Keys) {
+            $modifiedDirectories[$dir] = $true
+        }
+        
+        if ($ShowDeleteProgress -and $script:showProgress) {
+            Write-Host "      Final batch processed: $successCount total files deleted ($([math]::Round($processedSize / 1GB, 2)) GB)" -ForegroundColor Green
+        }
     }
 
     $totalSizeGB = [math]::Round($totalSize / 1GB, 2)

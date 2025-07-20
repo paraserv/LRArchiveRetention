@@ -5,6 +5,27 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-07-20
+
+### Added
+- **Parallel Streaming Mode**: Revolutionary performance improvement for network operations
+  - Combines streaming deletion with parallel processing for maximum throughput
+  - Files are processed in batches as discovered, no pre-scan required
+  - Automatic batch processing with configurable batch size (default: 500)
+  - Expected performance: 120-160 files/sec on network shares with 8 threads
+  - Enabled automatically when using `-Execute -ParallelProcessing`
+
+### Changed
+- Streaming mode now supports parallel processing for network share operations
+- Progress reporting enhanced to show thread count in parallel streaming mode
+- Batch processing logic unified between pre-scan and streaming modes
+
+### Technical Details
+- Uses same `Invoke-ParallelFileProcessing` function for consistency
+- Maintains O(1) memory usage while maximizing deletion throughput
+- Processes remaining batch after enumeration completes
+- Fully backwards compatible - sequential streaming still available
+
 ## [2.2.6] - 2025-07-20
 
 ### Fixed
