@@ -85,8 +85,8 @@ Get-SavedCredentials
 - **[docs/](docs/)** - Detailed technical documentation
 
 ### Quick References
-- **[winrm_helper.py Guide](README_winrm_helper.md)** - Remote operations utility
-- **[Improvements Roadmap](IMPROVEMENTS_TODO.md)** - Feature development status
+- **[Improvements Roadmap](IMPROVEMENTS_TODO.md)** - Feature development status and performance optimizations
+- **[Development Scripts](archive/development-scripts/)** - Legacy helper scripts and testing utilities
 
 ### Technical Guides
 - **[Network Credentials](docs/credentials.md)** - Secure credential management

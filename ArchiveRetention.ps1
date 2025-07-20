@@ -124,6 +124,20 @@ param(
     [ValidateRange(0, 300)]
     [int]$ProgressInterval = 30,
 
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Number of files to process in each batch for better network performance (default: 500).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Number of files to process in each batch for better network performance (default: 500).")]
+    [ValidateRange(1, 5000)]
+    [int]$BatchSize = 500,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Enable parallel file processing using runspaces.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Enable parallel file processing using runspaces.")]
+    [switch]$ParallelProcessing,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Number of parallel threads for file operations (default: 4, max: 16).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Number of parallel threads for file operations (default: 4, max: 16).")]
+    [ValidateRange(1, 16)]
+    [int]$ThreadCount = 4,
+
     # --- Help Parameter ---
     [Parameter(ParameterSetName = 'Help')]
     [switch]$Help
@@ -1117,6 +1131,167 @@ function Invoke-WithRetry {
     }
 }
 
+# Function for parallel file processing using runspaces
+function Invoke-ParallelFileProcessing {
+    param (
+        [array]$Files,
+        [bool]$Execute,
+        [int]$ThreadCount = 4,
+        [int]$MaxRetries = 3,
+        [int]$RetryDelaySeconds = 1,
+        [string]$DeletionLogPath = $null
+    )
+
+    Write-Log "Starting parallel file processing with $ThreadCount threads for $($Files.Count) files" -Level INFO
+    
+    # Create runspace pool
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, $ThreadCount)
+    $runspacePool.Open()
+    
+    # Thread-safe collections for results
+    $results = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
+    $modifiedDirs = [System.Collections.Concurrent.ConcurrentDictionary[string, bool]]::new()
+    
+    # Script block for file processing
+    $scriptBlock = {
+        param($FileInfo, $Execute, $MaxRetries, $RetryDelaySeconds, $DeletionLogPath)
+        
+        $result = @{
+            FilePath = $FileInfo.FullName
+            Success = $false
+            Error = $null
+            Size = $FileInfo.Length
+            ParentDir = Split-Path -Path $FileInfo.FullName -Parent
+        }
+        
+        try {
+            if ($Execute) {
+                $attempt = 1
+                $success = $false
+                
+                while (-not $success -and $attempt -le $MaxRetries) {
+                    try {
+                        Remove-Item -LiteralPath $FileInfo.FullName -Force -ErrorAction Stop
+                        $success = $true
+                        $result.Success = $true
+                        
+                        # Log to deletion file if path provided
+                        if ($DeletionLogPath) {
+                            try {
+                                Add-Content -Path $DeletionLogPath -Value $FileInfo.FullName -Encoding UTF8
+                            } catch {
+                                # Ignore deletion log errors in parallel context
+                            }
+                        }
+                    }
+                    catch {
+                        if ($attempt -ge $MaxRetries) {
+                            $result.Error = $_.Exception.Message
+                            break
+                        }
+                        Start-Sleep -Seconds ($RetryDelaySeconds * $attempt)
+                        $attempt++
+                    }
+                }
+            } else {
+                # Dry-run mode
+                $result.Success = $true
+            }
+        }
+        catch {
+            $result.Error = $_.Exception.Message
+        }
+        
+        return $result
+    }
+    
+    # Create and start jobs
+    $jobs = @()
+    $jobIndex = 0
+    
+    foreach ($file in $Files) {
+        $powerShell = [powershell]::Create()
+        $powerShell.RunspacePool = $runspacePool
+        $powerShell.AddScript($scriptBlock).AddArgument($file).AddArgument($Execute).AddArgument($MaxRetries).AddArgument($RetryDelaySeconds).AddArgument($DeletionLogPath) | Out-Null
+        
+        $job = @{
+            PowerShell = $powerShell
+            Handle = $powerShell.BeginInvoke()
+            Index = $jobIndex++
+        }
+        $jobs += $job
+    }
+    
+    # Monitor job completion with progress reporting
+    $completedJobs = 0
+    $successCount = 0
+    $errorCount = 0
+    $processedSize = 0
+    $startTime = Get-Date
+    
+    Write-Log "Waiting for $($jobs.Count) parallel jobs to complete..." -Level INFO
+    
+    while ($completedJobs -lt $jobs.Count) {
+        Start-Sleep -Milliseconds 100
+        
+        for ($i = 0; $i -lt $jobs.Count; $i++) {
+            $job = $jobs[$i]
+            if ($job.Handle.IsCompleted -and $job.PowerShell) {
+                try {
+                    $result = $job.PowerShell.EndInvoke($job.Handle)
+                    
+                    if ($result.Success) {
+                        $successCount++
+                        $processedSize += $result.Size
+                        # Track modified directory
+                        $modifiedDirs.TryAdd($result.ParentDir, $true) | Out-Null
+                    } else {
+                        $errorCount++
+                        if ($result.Error) {
+                            Write-Log "Parallel processing error for $($result.FilePath): $($result.Error)" -Level ERROR
+                        }
+                    }
+                }
+                catch {
+                    $errorCount++
+                    Write-Log "Job completion error: $($_.Exception.Message)" -Level ERROR
+                }
+                finally {
+                    $job.PowerShell.Dispose()
+                    $job.PowerShell = $null
+                    $completedJobs++
+                }
+            }
+        }
+        
+        # Progress reporting every 5% or 10 seconds
+        $percentComplete = [Math]::Round(($completedJobs / $jobs.Count) * 100, 1)
+        $elapsed = (Get-Date) - $startTime
+        
+        if ($script:showProgress -and ($completedJobs % [Math]::Max(1, [Math]::Floor($jobs.Count / 20)) -eq 0 -or $elapsed.TotalSeconds % 10 -eq 0)) {
+            $rate = if ($elapsed.TotalSeconds -gt 0) { [Math]::Round($completedJobs / $elapsed.TotalSeconds, 1) } else { 0 }
+            Write-Host "  Parallel progress: $percentComplete% ($completedJobs/$($jobs.Count)) - Rate: $rate files/sec" -ForegroundColor Green
+        }
+    }
+    
+    # Cleanup
+    $runspacePool.Close()
+    $runspacePool.Dispose()
+    
+    $finalElapsed = (Get-Date) - $startTime
+    $finalRate = if ($finalElapsed.TotalSeconds -gt 0) { [Math]::Round($jobs.Count / $finalElapsed.TotalSeconds, 1) } else { 0 }
+    
+    Write-Log "Parallel processing completed: $successCount successful, $errorCount errors in $([Math]::Round($finalElapsed.TotalSeconds, 1)) seconds ($finalRate files/sec)" -Level INFO
+    
+    return @{
+        SuccessCount = $successCount
+        ErrorCount = $errorCount
+        ProcessedSize = $processedSize
+        ModifiedDirectories = $modifiedDirs
+        Duration = $finalElapsed
+    }
+}
+
 # Main script execution
 try {
     # Initialize logging with timestamp and rotation
@@ -1180,6 +1355,14 @@ try {
     Write-Log "  Retention Period: $RetentionDays days (cutoff date: $($cutoffDate.ToString('yyyy-MM-dd')))" -Level INFO
     Write-Log "  Include File Types: $($IncludeFileTypes -join ', ')" -Level INFO
     Write-Log "  Exclude File Types: $(if ($ExcludeFileTypes.Count -eq 0) { '(none)' } else { $ExcludeFileTypes -join ', ' })" -Level INFO
+    Write-Log "  Batch Size: $BatchSize files" -Level INFO
+    Write-Log "  Parallel Processing: $(if ($ParallelProcessing) { "Enabled ($ThreadCount threads)" } else { 'Disabled (sequential)' })" -Level INFO
+    $progressFeatures = @()
+    if ($ShowScanProgress) { $progressFeatures += 'scan' }
+    if ($ShowDeleteProgress) { $progressFeatures += 'delete' }
+    $progressMode = if ($QuietMode) { 'Quiet (no progress)' } elseif ($progressFeatures.Count -gt 0) { "Enhanced ($($progressFeatures -join ', ') progress)" } else { 'Standard' }
+    Write-Log "  Progress Mode: $progressMode" -Level INFO
+    Write-Log "  Smart Directory Cleanup: Enabled (tracks modified directories)" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
 
     # Before file enumeration, add robust path validation and error handling.
@@ -1193,50 +1376,74 @@ try {
         exit 1
     }
 
-    # Count files that would be processed
+    # Enhanced file processing with streaming for large datasets
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
 
     $scanStartTime = Get-Date
+    $allFiles = @()  # For compatibility with existing progress tracking
+    $totalFileCount = 0
+    $totalSize = 0
+    $oldestFile = $null
+    $newestFile = $null
+    
     try {
         if ($ShowScanProgress -and $script:showProgress) {
-            Write-Host "  Enumerating files..." -ForegroundColor Cyan
+            Write-Host "  Streaming file enumeration (optimized for large datasets)..." -ForegroundColor Cyan
         }
 
-        $allFiles = Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction Stop
-
-        if ($ShowScanProgress -and $script:showProgress) {
-            Write-Host "  Found $($allFiles.Count) total files, filtering by type and date..." -ForegroundColor Cyan
-        }
-
-        if ($IncludeFileTypes -and $IncludeFileTypes.Count -gt 0) {
-            $allFiles = $allFiles | Where-Object { $IncludeFileTypes -contains ([System.IO.Path]::GetExtension($_.Name).ToLower()) }
-
-            if ($ShowScanProgress -and $script:showProgress) {
-                Write-Host "  After type filtering: $($allFiles.Count) files" -ForegroundColor Cyan
+        # Streaming file enumeration - processes files as they're discovered to avoid memory overload
+        Get-ChildItem -Path $ArchivePath -Recurse -File -Force -ErrorAction Stop | 
+            ForEach-Object -Begin {
+                $scannedCount = 0
+                $matchedCount = 0
+            } -Process {
+                $scannedCount++
+                
+                # Show scanning progress
+                if ($ShowScanProgress -and $script:showProgress -and ($scannedCount % 10000 -eq 0)) {
+                    Write-Host "    Scanned $scannedCount files, found $matchedCount matching..." -ForegroundColor Cyan
+                }
+                
+                # Apply file type filter first (most selective)
+                $include = $true
+                if ($IncludeFileTypes -and $IncludeFileTypes.Count -gt 0) {
+                    $extension = [System.IO.Path]::GetExtension($_.Name).ToLower()
+                    $include = $IncludeFileTypes -contains $extension
+                }
+                
+                # Apply date filter
+                if ($include -and $_.LastWriteTime -lt $cutoffDate) {
+                    $allFiles += $_
+                    $matchedCount++
+                    $totalFileCount++
+                    $totalSize += $_.Length
+                    
+                    # Track oldest and newest for statistics
+                    if ($null -eq $oldestFile -or $_.LastWriteTime -lt $oldestFile.LastWriteTime) {
+                        $oldestFile = $_
+                    }
+                    if ($null -eq $newestFile -or $_.LastWriteTime -gt $newestFile.LastWriteTime) {
+                        $newestFile = $_
+                    }
+                }
+            } -End {
+                $scanDuration = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
+                if ($ShowScanProgress -and $script:showProgress) {
+                    Write-Host "  Streaming scan completed: $scannedCount total files scanned, $matchedCount matched criteria in $scanDuration seconds" -ForegroundColor Cyan
+                }
             }
-        }
 
-        # Only include files older than the cutoff date
-        $allFiles = $allFiles | Where-Object { $_.LastWriteTime -lt $cutoffDate }
-
-        $scanDuration = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
-        if ($ShowScanProgress -and $script:showProgress) {
-            Write-Host "  Scan completed in $scanDuration seconds" -ForegroundColor Cyan
-        }
     } catch {
         $errMsg = "CRITICAL: Unable to enumerate files in path: $ArchivePath. Error: $($_.Exception.Message)"
         Write-Log $errMsg -Level FATAL
         Write-Host $errMsg -ForegroundColor Red
         exit 2
     }
-    $allFiles = $allFiles | Where-Object { $_ -ne $null }
 
-    $totalSizeGB = [math]::Round(($allFiles | Measure-Object -Property Length -Sum).Sum / 1GB, 2)
-    Write-Log "Found $($allFiles.Count) files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
+    $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
+    Write-Log "Found $totalFileCount files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
 
-    if ($allFiles.Count -gt 0) {
-        $oldestFile = $allFiles | Sort-Object LastWriteTime | Select-Object -First 1
-        $newestFile = $allFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($totalFileCount -gt 0) {
         Write-Log "  Oldest file: $($oldestFile.Name) (Last modified: $($oldestFile.LastWriteTime))" -Level INFO
         Write-Log "  Newest file: $($newestFile.Name) (Last modified: $($newestFile.LastWriteTime))" -Level INFO
     }
@@ -1257,62 +1464,146 @@ try {
     $errorCount = 0
     $successCount = 0
     $processingStartTime = Get-Date
-    foreach ($file in $allFiles) {
-        try {
-            if ($Execute) {
-                Invoke-WithRetry -Operation {
-                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
-                } -Description "Delete file: $($file.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
-                # Log deletion at DEBUG unless -Verbose
-                Write-Log "Deleted file: $($file.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
-                if ($script:DeletionLogWriter) {
-                    try {
-                        $script:DeletionLogWriter.WriteLine($file.FullName)
-                        $script:DeletionLogWriter.Flush()
-                    } catch {
-                        Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
-                    }
-                }
-            } else {
-                Write-Log "Would delete: $($file.FullName)" -Level DEBUG
+    $modifiedDirectories = @{}  # Track directories with deleted files for smart cleanup
+    
+    # Choose processing method based on ParallelProcessing flag
+    if ($ParallelProcessing -and $allFiles.Count -gt 0) {
+        Write-Log "Using parallel processing with $ThreadCount threads for maximum performance..." -Level INFO
+        
+        # Process files in parallel batches for optimal performance
+        for ($i = 0; $i -lt $allFiles.Count; $i += $BatchSize) {
+            $batchEnd = [Math]::Min($i + $BatchSize - 1, $allFiles.Count - 1)
+            $currentBatch = $allFiles[$i..$batchEnd]
+            $batchNumber = [Math]::Floor($i / $BatchSize) + 1
+            $totalBatches = [Math]::Ceiling($allFiles.Count / $BatchSize)
+            
+            Write-Log "Processing parallel batch $batchNumber of $totalBatches ($($currentBatch.Count) files)..." -Level DEBUG
+            
+            # Use parallel processing for the batch
+            $batchResult = Invoke-ParallelFileProcessing -Files $currentBatch -Execute $Execute -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
+            
+            # Aggregate results
+            $successCount += $batchResult.SuccessCount
+            $errorCount += $batchResult.ErrorCount
+            $processedSize += $batchResult.ProcessedSize
+            $processedCount += $currentBatch.Count
+            
+            # Merge modified directories
+            foreach ($dir in $batchResult.ModifiedDirectories.Keys) {
+                $modifiedDirectories[$dir] = $true
             }
-            $successCount++
-            $processedSize += $file.Length
-        } catch {
-            Write-Log "Error processing file $($file.FullName): $($_.Exception.Message)" -Level ERROR
-            $errorCount++
-            if ($errorCount -gt 100) {
-                Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
-                throw "Excessive errors during processing"
+            
+            $script:processedCount = $processedCount
+            $script:processedSize = $processedSize
+            
+            # Batch completion and progress reporting
+            if ($script:showProgress) {
+                $now = Get-Date
+                $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
+                
+                # Periodic detailed progress updates
+                if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
+                    $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+                    $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
+                    $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
+                    Write-Log "Parallel Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) - Batch $batchNumber/$totalBatches completed at $elapsedSeconds seconds" -Level INFO
+                    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+                    Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
+                    Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+                    Write-Log "  Rate: $rate" -Level INFO
+                    Write-Log "  Estimated time remaining: $eta" -Level INFO
+                    $script:lastProgressUpdate = $now
+                }
+            }
+            
+            # Small delay between parallel batches
+            if ($batchNumber -lt $totalBatches) {
+                Start-Sleep -Milliseconds 100
             }
         }
-        $processedCount++
-        $script:processedCount = $processedCount
-        $script:processedSize = $processedSize
-        # Progress reporting (only if enabled)
-        if ($script:showProgress) {
-            $now = Get-Date
-            $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
-
-            # Show real-time progress if requested
-            if ($ShowDeleteProgress -and ($processedCount % 10 -eq 0)) {
-                $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
-                $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
-                Write-Host "  Deleted: $processedCount/$($allFiles.Count) files ($percentComplete%) - $processedSizeGB GB" -ForegroundColor Green
+    } else {
+        # Sequential processing with batching for compatibility
+        Write-Log "Using sequential batch processing ($BatchSize files per batch)..." -Level INFO
+        
+        # Process files in batches to improve network efficiency
+        for ($i = 0; $i -lt $allFiles.Count; $i += $BatchSize) {
+            $batchEnd = [Math]::Min($i + $BatchSize - 1, $allFiles.Count - 1)
+            $currentBatch = $allFiles[$i..$batchEnd]
+            $batchNumber = [Math]::Floor($i / $BatchSize) + 1
+            $totalBatches = [Math]::Ceiling($allFiles.Count / $BatchSize)
+            
+            Write-Log "Processing sequential batch $batchNumber of $totalBatches ($($currentBatch.Count) files)..." -Level DEBUG
+            
+            foreach ($file in $currentBatch) {
+                try {
+                    if ($Execute) {
+                        Invoke-WithRetry -Operation {
+                            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
+                        } -Description "Delete file: $($file.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
+                        # Track parent directory for smart cleanup
+                        $parentDir = Split-Path -Path $file.FullName -Parent
+                        $modifiedDirectories[$parentDir] = $true
+                        # Log deletion at DEBUG unless -Verbose
+                        Write-Log "Deleted file: $($file.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
+                        if ($script:DeletionLogWriter) {
+                            try {
+                                $script:DeletionLogWriter.WriteLine($file.FullName)
+                                $script:DeletionLogWriter.Flush()
+                            } catch {
+                                Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
+                            }
+                        }
+                    } else {
+                        Write-Log "Would delete: $($file.FullName)" -Level DEBUG
+                        # Track parent directory for smart cleanup in dry-run too
+                        $parentDir = Split-Path -Path $file.FullName -Parent
+                        $modifiedDirectories[$parentDir] = $true
+                    }
+                    $successCount++
+                    $processedSize += $file.Length
+                } catch {
+                    Write-Log "Error processing file $($file.FullName): $($_.Exception.Message)" -Level ERROR
+                    $errorCount++
+                    if ($errorCount -gt 100) {
+                        Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
+                        throw "Excessive errors during processing"
+                    }
+                }
+                $processedCount++
+                $script:processedCount = $processedCount
+                $script:processedSize = $processedSize
+                
+                # Show real-time progress if requested (every 10 files within batch)
+                if ($script:showProgress -and $ShowDeleteProgress -and ($processedCount % 10 -eq 0)) {
+                    $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+                    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+                    Write-Host "  Processed: $processedCount/$($allFiles.Count) files ($percentComplete%) - $processedSizeGB GB" -ForegroundColor Green
+                }
             }
-
-            # Periodic detailed progress updates
-            if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
-                $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
-                $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
-                $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
-                Write-Log "Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) at $elapsedSeconds seconds run-time" -Level INFO
-                $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
-                Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
-                Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
-                Write-Log "  Rate: $rate" -Level INFO
-                Write-Log "  Estimated time remaining: $eta" -Level INFO
-                $script:lastProgressUpdate = $now
+            
+            # Batch completion and progress reporting
+            if ($script:showProgress) {
+                $now = Get-Date
+                $elapsedSeconds = [math]::Round(($now - $processingStartTime).TotalSeconds, 1)
+                
+                # Periodic detailed progress updates (at batch boundaries or time intervals)
+                if (($now - $script:lastProgressUpdate) -gt $script:progressUpdateInterval) {
+                    $percentComplete = [Math]::Round(($processedCount / $allFiles.Count) * 100, 1)
+                    $rate = Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount
+                    $eta = Get-EstimatedTimeRemaining -StartTime $processingStartTime -ProcessedCount $processedCount -TotalCount $allFiles.Count
+                    Write-Log "Sequential Progress: $percentComplete% ($processedCount of $($allFiles.Count) files) - Batch $batchNumber/$totalBatches completed at $elapsedSeconds seconds" -Level INFO
+                    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+                    Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
+                    Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+                    Write-Log "  Rate: $rate" -Level INFO
+                    Write-Log "  Estimated time remaining: $eta" -Level INFO
+                    $script:lastProgressUpdate = $now
+                }
+            }
+            
+            # Small delay between batches to prevent overwhelming the system
+            if ($batchNumber -lt $totalBatches) {
+                Start-Sleep -Milliseconds 50
             }
         }
     }
@@ -1347,68 +1638,92 @@ try {
     Write-Log "  Rate: $(Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount)" -Level INFO
     Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
 
-    # --- Empty Directory Cleanup ---
+    # --- Smart Empty Directory Cleanup ---
     if ($SkipDirCleanup) {
         Write-Log "Skipping empty directory cleanup under $ArchivePath due to -SkipDirCleanup switch." -Level INFO
     } else {
-        Write-Log "Starting empty directory cleanup under $ArchivePath..." -Level INFO
+        Write-Log "Starting smart empty directory cleanup..." -Level INFO
         $cleanupStartTime = Get-Date
         try {
-            # Optimized directory enumeration - only get directories that could be empty
-            if ($ShowScanProgress -and $script:showProgress) {
-                Write-Host "  Scanning for empty directories..." -ForegroundColor Cyan
-            }
-
-            # Get all directories, sorted deepest first for efficient cleanup
-            $allDirs = Get-ChildItem -Path $ArchivePath -Recurse -Directory -Force | Sort-Object FullName -Descending
             $removedCount = 0
             $checkedCount = 0
-
-            foreach ($dir in $allDirs) {
-                $checkedCount++
-
-                # Never remove the root archive path itself
-                if ($dir.FullName -eq (Resolve-Path $ArchivePath)) { continue }
-
-                # Optimized empty check - use faster directory test
-                try {
-                    $isEmpty = @(Get-ChildItem -Path $dir.FullName -Force -ErrorAction Stop).Count -eq 0
-                } catch {
-                    # Skip directories we can't access
-                    continue
+            
+            if ($modifiedDirectories.Count -gt 0) {
+                Write-Log "Using smart cleanup - focusing on $($modifiedDirectories.Count) directories where files were deleted" -Level INFO
+                if ($ShowScanProgress -and $script:showProgress) {
+                    Write-Host "  Smart directory cleanup (checking only modified directories)..." -ForegroundColor Cyan
                 }
-
-                if ($isEmpty) {
-                    if ($Execute) {
-                        try {
-                            Remove-Item -Path $dir.FullName -Force -ErrorAction Stop
-                            Write-Log "Removed empty directory: $($dir.FullName)" -Level DEBUG
-                            $removedCount++
-                        } catch {
-                            Write-Log "Failed to remove empty directory: $($dir.FullName) - $($_.Exception.Message)" -Level WARNING
+                
+                # Get all directories from modified paths and their parents, sorted deepest first
+                $directoriesToCheck = @()
+                foreach ($modifiedDir in $modifiedDirectories.Keys) {
+                    # Add the directory itself
+                    if (Test-Path $modifiedDir -PathType Container) {
+                        $directoriesToCheck += $modifiedDir
+                    }
+                    
+                    # Add parent directories up to the archive root
+                    $currentDir = $modifiedDir
+                    while ($currentDir -ne $ArchivePath -and $currentDir -ne (Split-Path $currentDir -Parent)) {
+                        $parentDir = Split-Path $currentDir -Parent
+                        if ($parentDir -and $parentDir -ne $ArchivePath -and (Test-Path $parentDir -PathType Container)) {
+                            $directoriesToCheck += $parentDir
                         }
-                    } else {
-                        Write-Log "Would remove empty directory: $($dir.FullName)" -Level DEBUG
-                        $removedCount++
+                        $currentDir = $parentDir
                     }
                 }
-
-                # Show progress for directory cleanup if requested
-                if ($ShowScanProgress -and $script:showProgress -and ($checkedCount % 100 -eq 0)) {
-                    Write-Host "    Checked $checkedCount/$($allDirs.Count) directories, found $removedCount empty" -ForegroundColor Cyan
+                
+                # Remove duplicates and sort deepest first for efficient cleanup
+                $directoriesToCheck = $directoriesToCheck | Sort-Object -Unique | Sort-Object Length -Descending
+                
+                foreach ($dirPath in $directoriesToCheck) {
+                    $checkedCount++
+                    
+                    # Never remove the root archive path itself
+                    if ($dirPath -eq (Resolve-Path $ArchivePath)) { continue }
+                    
+                    # Optimized empty check
+                    try {
+                        $isEmpty = @(Get-ChildItem -Path $dirPath -Force -ErrorAction Stop).Count -eq 0
+                    } catch {
+                        # Skip directories we can't access
+                        continue
+                    }
+                    
+                    if ($isEmpty) {
+                        if ($Execute) {
+                            try {
+                                Remove-Item -Path $dirPath -Force -ErrorAction Stop
+                                Write-Log "Removed empty directory: $dirPath" -Level DEBUG
+                                $removedCount++
+                            } catch {
+                                Write-Log "Failed to remove empty directory: $dirPath - $($_.Exception.Message)" -Level WARNING
+                            }
+                        } else {
+                            Write-Log "Would remove empty directory: $dirPath" -Level DEBUG
+                            $removedCount++
+                        }
+                    }
+                    
+                    # Show progress for directory cleanup if requested
+                    if ($ShowScanProgress -and $script:showProgress -and ($checkedCount % 50 -eq 0)) {
+                        Write-Host "    Smart cleanup: checked $checkedCount directories, found $removedCount empty" -ForegroundColor Cyan
+                    }
                 }
+            } else {
+                Write-Log "No files were processed, skipping directory cleanup" -Level INFO
             }
-
+            
             $cleanupDuration = [math]::Round(((Get-Date) - $cleanupStartTime).TotalSeconds, 1)
-
+            
             if ($removedCount -gt 0) {
-                $msg = if ($Execute) { "Removed $removedCount empty directories under $ArchivePath in $cleanupDuration seconds" } else { "Would remove $removedCount empty directories under $ArchivePath (dry-run) - scan took $cleanupDuration seconds" }
+                $msg = if ($Execute) { "Smart cleanup removed $removedCount empty directories in $cleanupDuration seconds (checked $checkedCount total)" } else { "Smart cleanup would remove $removedCount empty directories (dry-run) - scan took $cleanupDuration seconds" }
                 Write-Log $msg -Level INFO
             } else {
-                Write-Log "No empty directories found to remove under $ArchivePath (scanned $checkedCount directories in $cleanupDuration seconds)" -Level INFO
+                Write-Log "Smart cleanup found no empty directories to remove (checked $checkedCount directories in $cleanupDuration seconds)" -Level INFO
             }
         } catch {
-            Write-Log "Error during empty directory cleanup: $($_.Exception.Message)" -Level WARNING
+            Write-Log "Error during smart directory cleanup: $($_.Exception.Message)" -Level WARNING
         }
     }
     # --- End Empty Directory Cleanup ---

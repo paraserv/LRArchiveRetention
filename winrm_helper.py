@@ -107,7 +107,7 @@ def test_archive_retention_nas():
 
     return result['exit_code'] == 0
 
-def run_nas_dry_run(retention_days=456):
+def run_nas_dry_run(retention_days=456, parallel=False, threads=4):
     """Run dry-run against NAS with specified retention period"""
     session = create_session()
 
@@ -115,10 +115,12 @@ def run_nas_dry_run(retention_days=456):
     print("Cleaning lock files...")
     clean_lock_files(session)
 
-    # Dry run with progress monitoring
-    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30'
+    # Build command with optional parallel processing
+    parallel_params = f' -ParallelProcessing -ThreadCount {threads}' if parallel else ''
+    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30{parallel_params}'
 
-    print(f"Running NAS dry-run with {retention_days} days retention...")
+    processing_mode = f"parallel ({threads} threads)" if parallel else "sequential"
+    print(f"Running NAS dry-run with {retention_days} days retention using {processing_mode} processing...")
     result = run_powershell(session, command, timeout=300)  # 5-minute timeout for NAS operations
 
     print(f"Exit code: {result['exit_code']}")
@@ -131,7 +133,7 @@ def run_nas_dry_run(retention_days=456):
 
     return result
 
-def run_nas_execute(retention_days=456):
+def run_nas_execute(retention_days=456, parallel=False, threads=4):
     """Execute actual deletion against NAS with specified retention period"""
     session = create_session()
 
@@ -139,10 +141,12 @@ def run_nas_execute(retention_days=456):
     print("Cleaning lock files...")
     clean_lock_files(session)
 
-    # Execute with progress monitoring
-    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -Execute -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30'
+    # Build command with optional parallel processing
+    parallel_params = f' -ParallelProcessing -ThreadCount {threads}' if parallel else ''
+    command = f'& "C:\\LR\\Scripts\\LRArchiveRetention\\ArchiveRetention.ps1" -CredentialTarget "NAS_CREDS" -RetentionDays {retention_days} -Execute -ShowScanProgress -ShowDeleteProgress -ProgressInterval 30{parallel_params}'
 
-    print(f"EXECUTING NAS deletion with {retention_days} days retention...")
+    processing_mode = f"parallel ({threads} threads)" if parallel else "sequential"
+    print(f"EXECUTING NAS deletion with {retention_days} days retention using {processing_mode} processing...")
     result = run_powershell(session, command, timeout=600)  # 10-minute timeout for execution
 
     print(f"Exit code: {result['exit_code']}")
@@ -200,9 +204,12 @@ def main():
         print("  parameters          - Test v2.0.0 features")
         print("  nas_dry_run [days]  - Production dry-run (default: 456 days)")
         print("  nas_execute [days]  - Production execution (default: 456 days)")
+        print("  parallel_test [days] [threads] - Test parallel processing (default: 456 days, 4 threads)")
+        print("  parallel_execute [days] [threads] - Production parallel execution")
         print("  version             - Show version information")
         print()
         print("retention_days: optional, defaults to 456 (15 months)")
+        print("threads: optional for parallel commands, defaults to 4")
         sys.exit(1)
 
     test_type = sys.argv[1]
@@ -213,6 +220,7 @@ def main():
         sys.exit(0)
 
     retention_days = int(sys.argv[2]) if len(sys.argv) > 2 else 456
+    threads = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 
     if test_type == "local":
         success = test_archive_retention_local()
@@ -228,6 +236,16 @@ def main():
         sys.exit(0 if result['exit_code'] == 0 else 1)
     elif test_type == "nas_execute":
         result = run_nas_execute(retention_days)
+        sys.exit(0 if result['exit_code'] == 0 else 1)
+    elif test_type == "parallel_test":
+        result = run_nas_dry_run(retention_days, parallel=True, threads=threads)  # Parallel dry run first
+        if result['exit_code'] == 0:
+            print("\n" + "="*50)
+            print("PARALLEL DRY RUN SUCCESSFUL - Now testing parallel execution")
+            result = run_nas_execute(retention_days, parallel=True, threads=threads)
+        sys.exit(0 if result['exit_code'] == 0 else 1)
+    elif test_type == "parallel_execute":
+        result = run_nas_execute(retention_days, parallel=True, threads=threads)
         sys.exit(0 if result['exit_code'] == 0 else 1)
     else:
         print(f"Unknown test type: {test_type}")
