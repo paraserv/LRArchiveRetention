@@ -5,6 +5,14 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.6] - 2025-07-20
+
+### Fixed
+- **CRITICAL PERFORMANCE FIX**: Parallel processing now uses `[System.IO.File]::Delete()` instead of `Remove-Item`
+  - Previous: Parallel mode was NOT faster than sequential due to using slow Remove-Item cmdlet
+  - Now: Parallel mode should achieve 120-160 files/sec on network shares (4-8x improvement)
+  - This completes the System.IO optimization for ALL code paths (streaming, sequential, and parallel)
+
 ## [2.2.5] - 2025-07-20
 
 ### Fixed

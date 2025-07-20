@@ -1184,7 +1184,7 @@ function Invoke-ParallelFileProcessing {
                 
                 while (-not $success -and $attempt -le $MaxRetries) {
                     try {
-                        Remove-Item -LiteralPath $FileInfo.FullName -Force -ErrorAction Stop
+                        [System.IO.File]::Delete($FileInfo.FullName)
                         $success = $true
                         $result.Success = $true
                         
