@@ -1599,13 +1599,7 @@ try {
 
     $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
     
-    if ($useStreamingMode) {
-        # Streaming mode - files already processed
-        Write-Log "Streaming deletion complete: Processed $totalFileCount files ($totalSizeGB GB) older than $RetentionDays days" -Level INFO
-        Write-Log "  Successfully deleted: $successCount files" -Level INFO
-        Write-Log "  Failed: $errorCount files" -Level INFO
-        Write-Log "  Space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -Level INFO
-    } else {
+    if (-not $useStreamingMode) {
         # Pre-scan mode - files to be processed
         Write-Log "Found $totalFileCount files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
     }
@@ -1630,8 +1624,14 @@ try {
         $processingStartTime = Get-Date
     }
     
-    # Choose processing method based on ParallelProcessing flag
-    if ($ParallelProcessing -and $allFiles.Count -gt 0) {
+    # Skip batch processing if we already processed files in streaming mode
+    if ($useStreamingMode) {
+        Write-Log "Streaming deletion complete: Processed $totalFileCount files ($totalSizeGB GB) older than $RetentionDays days" -Level INFO
+        Write-Log "  Successfully deleted: $successCount files" -Level INFO
+        Write-Log "  Failed: $errorCount files" -Level INFO
+        Write-Log "  Space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -Level INFO
+    } elseif ($ParallelProcessing -and $allFiles.Count -gt 0) {
+        # Choose processing method based on ParallelProcessing flag
         Write-Log "Using parallel processing with $ThreadCount threads for maximum performance..." -Level INFO
         
         # Process files in parallel batches for optimal performance
@@ -1685,7 +1685,7 @@ try {
                 Start-Sleep -Milliseconds 100
             }
         }
-    } else {
+    } elseif ($allFiles.Count -gt 0) {
         # Sequential processing with batching for compatibility
         Write-Log "Using sequential batch processing ($BatchSize files per batch)..." -Level INFO
         
