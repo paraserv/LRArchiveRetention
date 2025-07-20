@@ -41,6 +41,8 @@ Desktop.ini
 .vscode/
 .idea/
 *.sublime-*
+.claude/
+.cursor/
 *.suo
 *.user
 *.userosscache
