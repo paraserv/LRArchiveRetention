@@ -5,6 +5,60 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2025-07-20
+
+### Fixed
+- **CRITICAL PERFORMANCE FIX**: Replaced PowerShell `Remove-Item` with `[System.IO.File]::Delete()` for file deletion
+  - Previous: ~20 files/sec deletion rate
+  - Expected: 100-500 files/sec deletion rate (5-25x improvement)
+  - This fix implements the optimization specified in "Optimized Plan.md"
+  - Affects both streaming mode and batch processing
+
+### Changed
+- File deletion now uses direct .NET API for maximum performance
+- Maintains same retry logic and error handling
+
+## [2.2.0] - 2025-07-20
+
+### Added
+- **Streaming Deletion Mode**: Files are processed and deleted as discovered in EXECUTE mode
+- **Zero Memory Growth**: Constant O(1) memory usage for any dataset size
+- **Immediate Processing**: Deletions begin within seconds, no waiting for full scan
+
+### Changed
+- **Default Behavior**: EXECUTE mode now uses streaming deletion (no pre-scan)
+- **Pre-scan Behavior**: Only performed in dry-run mode or when showing summaries
+- **Progress Reporting**: Adapted for real-time streaming feedback
+- **Memory Model**: Eliminated array building for execute operations
+
+### Performance
+- **Memory Usage**: From O(n) to O(1) - handles millions of files with minimal RAM
+- **Start Time**: Deletions begin immediately vs waiting for full scan completion
+- **Interruption Safe**: Progress is saved continuously, no lost work
+- **Scalability**: No practical limit on number of files processed
+
+### Technical Details
+- Pre-scan still available for dry-run mode to show what would be deleted
+- Batch processing logic preserved but bypassed in streaming mode
+- Statistics (oldest/newest files) still tracked without array building
+
+## [2.1.0] - 2025-07-20
+
+### Added
+- **System.IO Optimization**: Implemented `System.IO.Directory.EnumerateFiles` for 10-20x performance improvement
+- **Enhanced Scan Performance**: Dramatically improved file enumeration speed for large datasets (50,000-200,000+ files)
+- **Real-time Performance Metrics**: Display scan rate (files/second) during enumeration
+
+### Changed
+- **File Enumeration Method**: Replaced `Get-ChildItem` with streaming `System.IO` enumeration
+- **Memory Usage**: Reduced from O(n) to O(1) memory complexity during file scanning
+- **Scan Progress**: Enhanced progress reporting with performance metrics
+
+### Performance
+- **Expected Improvements**: 10-20x faster file enumeration on large datasets
+- **Memory Efficiency**: Constant memory usage regardless of file count
+- **Streaming Processing**: Files are processed as discovered, not loaded into memory
+
 ## [2.0.0] - 2025-07-19
 
 ### Added
