@@ -339,19 +339,6 @@ function Test-StaleLock {
 # Check for and clean up stale locks first
 Test-StaleLock -LockFilePath $script:LockFilePath | Out-Null
 
-# Also check for running ArchiveRetention processes
-$runningProcesses = Get-WmiObject Win32_Process | Where-Object { 
-    $_.CommandLine -like "*ArchiveRetention.ps1*" -and $_.ProcessId -ne $PID 
-}
-if ($runningProcesses) {
-    Write-Log "Found existing ArchiveRetention.ps1 process(es) running:" -Level WARNING
-    foreach ($proc in $runningProcesses) {
-        Write-Log "  PID: $($proc.ProcessId), Command: $($proc.CommandLine -replace '^(.{100}).*', '$1...')" -Level WARNING
-    }
-    Write-Log "Another instance appears to be running. Exiting to prevent conflicts." -Level FATAL
-    exit 9
-}
-
 try {
     $script:LockFileStream = [System.IO.FileStream]::new(
         $script:LockFilePath,
@@ -1377,15 +1364,6 @@ try {
     Write-Log "  Progress Mode: $progressMode" -Level INFO
     Write-Log "  Smart Directory Cleanup: Enabled (tracks modified directories)" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
-    
-    # Performance tip for network operations
-    if (-not $ParallelProcessing -and $ArchivePath -like "\\*") {
-        Write-Log "PERFORMANCE TIP: For network paths, use -ParallelProcessing -ThreadCount 8 for 4-8x faster deletion" -Level INFO
-        if ($script:showProgress) {
-            Write-Host "`n  ⚡ PERFORMANCE TIP: Add -ParallelProcessing -ThreadCount 8 for much faster network deletion!" -ForegroundColor Yellow
-            Write-Host "     Example: .\ArchiveRetention.ps1 ... -ParallelProcessing -ThreadCount 8 -BatchSize 200" -ForegroundColor DarkYellow
-        }
-    }
 
     # Before file enumeration, add robust path validation and error handling.
     if (-not (Test-Path $ArchivePath)) {
@@ -1402,28 +1380,11 @@ try {
     Write-Log "Scanning for files older than $RetentionDays days..." -Level INFO
 
     $scanStartTime = Get-Date
-    $allFiles = @()  # Only populated in dry-run mode
+    $allFiles = @()  # For compatibility with existing progress tracking
     $totalFileCount = 0
     $totalSize = 0
     $oldestFile = $null
     $newestFile = $null
-    $processedCount = 0
-    $processedSize = 0
-    $errorCount = 0
-    $successCount = 0
-    $modifiedDirectories = @{}  # Track directories with deleted files for smart cleanup
-    
-    # Determine processing mode
-    $useStreamingMode = $Execute -and -not $ShowDeleteSummary
-    
-    if ($useStreamingMode) {
-        Write-Log "Using streaming deletion mode for optimal performance on large datasets" -Level INFO
-        Write-Log "Progress updates: Every 1,000 files processed or every 30 seconds (whichever comes first)" -Level INFO
-        if ($script:showProgress) {
-            Write-Host "  Streaming mode: Files will be processed as discovered (no pre-scan)" -ForegroundColor Cyan
-            Write-Host "  Progress updates: Every 1,000 files or 30 seconds" -ForegroundColor Gray
-        }
-    }
     
     try {
         if ($ShowScanProgress -and $script:showProgress) {
@@ -1433,9 +1394,6 @@ try {
         # Use System.IO.Directory.EnumerateFiles for 10-20x performance improvement
         $scannedCount = 0
         $matchedCount = 0
-        $lastProgressLog = Get-Date
-        $progressLogInterval = [TimeSpan]::FromSeconds(30)
-        $progressFileInterval = 1000  # Log every 1000 files
         
         # Determine file patterns to search
         $patterns = if ($IncludeFileTypes -and $IncludeFileTypes.Count -gt 0) {
@@ -1457,11 +1415,7 @@ try {
                 
                 # Show scanning progress
                 if ($ShowScanProgress -and $script:showProgress -and ($scannedCount % 10000 -eq 0)) {
-                    if ($useStreamingMode) {
-                        Write-Host "    Processed $scannedCount files, deleted $successCount files..." -ForegroundColor Cyan
-                    } else {
-                        Write-Host "    Scanned $scannedCount files, found $matchedCount matching..." -ForegroundColor Cyan
-                    }
+                    Write-Host "    Scanned $scannedCount files, found $matchedCount matching..." -ForegroundColor Cyan
                 }
                 
                 try {
@@ -1470,124 +1424,42 @@ try {
                     
                     # Apply date filter
                     if ($fileInfo.LastWriteTime -lt $cutoffDate) {
+                        # Create PSObject to match expected format downstream
+                        $fileObj = [PSCustomObject]@{
+                            FullName = $fileInfo.FullName
+                            Name = $fileInfo.Name
+                            DirectoryName = $fileInfo.DirectoryName
+                            LastWriteTime = $fileInfo.LastWriteTime
+                            CreationTime = $fileInfo.CreationTime
+                            Length = $fileInfo.Length
+                            Extension = $fileInfo.Extension
+                        }
+                        
+                        $allFiles += $fileObj
                         $matchedCount++
                         $totalFileCount++
                         $totalSize += $fileInfo.Length
                         
-                        if ($useStreamingMode) {
-                            # STREAMING MODE: Process file immediately
-                            try {
-                                Invoke-WithRetry -Operation {
-                                    [System.IO.File]::Delete($fileInfo.FullName)
-                                } -Description "Delete file: $($fileInfo.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
-                                
-                                # Track parent directory for smart cleanup
-                                $parentDir = $fileInfo.DirectoryName
-                                $modifiedDirectories[$parentDir] = $true
-                                
-                                # Log deletion
-                                Write-Log "Deleted file: $($fileInfo.FullName)" -Level $(if ($VerbosePreference -eq 'Continue') { 'INFO' } else { 'DEBUG' })
-                                if ($script:DeletionLogWriter) {
-                                    try {
-                                        $script:DeletionLogWriter.WriteLine($fileInfo.FullName)
-                                        $script:DeletionLogWriter.Flush()
-                                    } catch {
-                                        Write-Log "Failed to write to deletion log: $($_.Exception.Message)" -Level WARNING
-                                    }
-                                }
-                                
-                                $successCount++
-                                $processedCount++
-                                $processedSize += $fileInfo.Length
-                                
-                                # Show deletion progress
-                                if ($ShowDeleteProgress -and $script:showProgress -and ($successCount % 10 -eq 0)) {
-                                    Write-Host "      Deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB)..." -ForegroundColor Green
-                                }
-                                
-                                # Periodic progress to main log (every 1000 files or 30 seconds)
-                                $currentTime = Get-Date
-                                $timeSinceLastLog = $currentTime - $lastProgressLog
-                                if (($successCount % $progressFileInterval -eq 0) -or ($timeSinceLastLog -gt $progressLogInterval)) {
-                                    $elapsedTotal = $currentTime - $scanStartTime
-                                    $rate = if ($elapsedTotal.TotalSeconds -gt 0) { 
-                                        [math]::Round($successCount / $elapsedTotal.TotalSeconds, 1) 
-                                    } else { 0 }
-                                    $scanRate = if ($elapsedTotal.TotalSeconds -gt 0) { 
-                                        [math]::Round($scannedCount / $elapsedTotal.TotalSeconds, 0) 
-                                    } else { 0 }
-                                    
-                                    Write-Log "Streaming progress: Scanned $scannedCount files, deleted $successCount files ($([math]::Round($processedSize / 1GB, 2)) GB freed)" -Level INFO
-                                    Write-Log "  Deletion rate: $rate files/sec, Scan rate: $scanRate files/sec" -Level INFO
-                                    Write-Log "  Running time: $([math]::Round($elapsedTotal.TotalMinutes, 1)) minutes" -Level INFO
-                                    $lastProgressLog = $currentTime
-                                }
-                            }
-                            catch {
-                                Write-Log "Error deleting file $($fileInfo.FullName): $($_.Exception.Message)" -Level ERROR
-                                $errorCount++
-                                if ($errorCount -gt 100) {
-                                    Write-Log "Too many errors encountered. Stopping processing." -Level ERROR
-                                    throw "Excessive errors during processing"
-                                }
-                            }
-                        }
-                        else {
-                            # PRE-SCAN MODE: Build array for dry-run or summary
-                            $fileObj = [PSCustomObject]@{
-                                FullName = $fileInfo.FullName
-                                Name = $fileInfo.Name
-                                DirectoryName = $fileInfo.DirectoryName
-                                LastWriteTime = $fileInfo.LastWriteTime
-                                CreationTime = $fileInfo.CreationTime
-                                Length = $fileInfo.Length
-                                Extension = $fileInfo.Extension
-                            }
-                            
-                            $allFiles += $fileObj
-                            
-                            # Track parent directory for smart cleanup
-                            $modifiedDirectories[$fileInfo.DirectoryName] = $true
-                        }
-                        
                         # Track oldest and newest for statistics
                         if ($null -eq $oldestFile -or $fileInfo.LastWriteTime -lt $oldestFile.LastWriteTime) {
-                            $oldestFile = [PSCustomObject]@{
-                                Name = $fileInfo.Name
-                                LastWriteTime = $fileInfo.LastWriteTime
-                            }
+                            $oldestFile = $fileObj
                         }
                         if ($null -eq $newestFile -or $fileInfo.LastWriteTime -gt $newestFile.LastWriteTime) {
-                            $newestFile = [PSCustomObject]@{
-                                Name = $fileInfo.Name
-                                LastWriteTime = $fileInfo.LastWriteTime
-                            }
+                            $newestFile = $fileObj
                         }
                     }
                 }
                 catch {
                     Write-Log "Error processing file: $filePath - $($_.Exception.Message)" -Level WARNING
-                    if ($useStreamingMode) {
-                        $errorCount++
-                    }
                 }
             }
         }
         
         $scanDuration = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
-        if ($script:showProgress) {
-            if ($useStreamingMode) {
-                Write-Host "  Streaming deletion completed: $scannedCount files scanned, $successCount deleted in $scanDuration seconds" -ForegroundColor Cyan
-                if ($successCount -gt 0) {
-                    $deleteRate = if ($scanDuration -gt 0) { [math]::Round($successCount / $scanDuration, 0) } else { 0 }
-                    Write-Host "  Deletion performance: $deleteRate files/second" -ForegroundColor Green
-                    Write-Host "  Total space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -ForegroundColor Green
-                }
-            } else {
-                Write-Host "  System.IO scan completed: $scannedCount total files scanned, $matchedCount matched criteria in $scanDuration seconds" -ForegroundColor Cyan
-                $scanRate = if ($scanDuration -gt 0) { [math]::Round($scannedCount / $scanDuration, 0) } else { 0 }
-                Write-Host "  Scan performance: $scanRate files/second" -ForegroundColor Green
-            }
+        if ($ShowScanProgress -and $script:showProgress) {
+            Write-Host "  System.IO scan completed: $scannedCount total files scanned, $matchedCount matched criteria in $scanDuration seconds" -ForegroundColor Cyan
+            $scanRate = if ($scanDuration -gt 0) { [math]::Round($scannedCount / $scanDuration, 0) } else { 0 }
+            Write-Host "  Scan performance: $scanRate files/second" -ForegroundColor Green
         }
 
     } catch {
@@ -1598,41 +1470,33 @@ try {
     }
 
     $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
-    
-    if (-not $useStreamingMode) {
-        # Pre-scan mode - files to be processed
-        Write-Log "Found $totalFileCount files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
-    }
+    Write-Log "Found $totalFileCount files ($totalSizeGB GB) that would be processed (older than $RetentionDays days)" -Level INFO
 
-    if ($totalFileCount -gt 0 -and $oldestFile -and $newestFile) {
+    if ($totalFileCount -gt 0) {
         Write-Log "  Oldest file: $($oldestFile.Name) (Last modified: $($oldestFile.LastWriteTime))" -Level INFO
         Write-Log "  Newest file: $($newestFile.Name) (Last modified: $($newestFile.LastWriteTime))" -Level INFO
     }
 
     # Initialize progress tracking variables
-    $processingStartTime = Get-Date  # Always initialize for time calculations
-    
-    if (-not $useStreamingMode) {
-        $script:lastProgressUpdate = Get-Date
+    $script:lastProgressUpdate = Get-Date
 
-        # Configure progress interval based on parameters
-        if ($QuietMode -or $ProgressInterval -eq 0) {
-            $script:progressUpdateInterval = [TimeSpan]::MaxValue  # Effectively disable progress updates
-            $script:showProgress = $false
-        } else {
-            $script:progressUpdateInterval = [TimeSpan]::FromSeconds($ProgressInterval)
-            $script:showProgress = $true
-        }
+    # Configure progress interval based on parameters
+    if ($QuietMode -or $ProgressInterval -eq 0) {
+        $script:progressUpdateInterval = [TimeSpan]::MaxValue  # Effectively disable progress updates
+        $script:showProgress = $false
+    } else {
+        $script:progressUpdateInterval = [TimeSpan]::FromSeconds($ProgressInterval)
+        $script:showProgress = $true
     }
+    $processedCount = 0
+    $processedSize = 0
+    $errorCount = 0
+    $successCount = 0
+    $processingStartTime = Get-Date
+    $modifiedDirectories = @{}  # Track directories with deleted files for smart cleanup
     
-    # Skip batch processing if we already processed files in streaming mode
-    if ($useStreamingMode) {
-        Write-Log "Streaming deletion complete: Processed $totalFileCount files ($totalSizeGB GB) older than $RetentionDays days" -Level INFO
-        Write-Log "  Successfully deleted: $successCount files" -Level INFO
-        Write-Log "  Failed: $errorCount files" -Level INFO
-        Write-Log "  Space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -Level INFO
-    } elseif ($ParallelProcessing -and $allFiles.Count -gt 0) {
-        # Choose processing method based on ParallelProcessing flag
+    # Choose processing method based on ParallelProcessing flag
+    if ($ParallelProcessing -and $allFiles.Count -gt 0) {
         Write-Log "Using parallel processing with $ThreadCount threads for maximum performance..." -Level INFO
         
         # Process files in parallel batches for optimal performance
@@ -1686,7 +1550,7 @@ try {
                 Start-Sleep -Milliseconds 100
             }
         }
-    } elseif ($allFiles.Count -gt 0) {
+    } else {
         # Sequential processing with batching for compatibility
         Write-Log "Using sequential batch processing ($BatchSize files per batch)..." -Level INFO
         
@@ -1703,7 +1567,7 @@ try {
                 try {
                     if ($Execute) {
                         Invoke-WithRetry -Operation {
-                            [System.IO.File]::Delete($file.FullName)
+                            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
                         } -Description "Delete file: $($file.FullName)" -MaxRetries $MaxRetries -DelaySeconds $RetryDelaySeconds
                         # Track parent directory for smart cleanup
                         $parentDir = Split-Path -Path $file.FullName -Parent
@@ -1771,9 +1635,7 @@ try {
                 Start-Sleep -Milliseconds 50
             }
         }
-    }  # End of batch processing section
-    
-    # Calculate processing time
+    }
     $processingTime = $null
     if ($processingStartTime -is [DateTime]) {
         try {
@@ -1786,40 +1648,24 @@ try {
         Write-Log "Warning: processingStartTime is not a DateTime. Type: $($processingStartTime.GetType().FullName), value: $processingStartTime" -Level WARNING
     }
     $processingTimeStr = if ($processingTime -is [TimeSpan]) { '{0:hh\:mm\:ss}' -f $processingTime } else { 'Unknown' }
-    # Processing complete summary
-    if (-not $useStreamingMode -or $totalFileCount -gt 0) {
-        Write-Log " " -Level INFO
-        Write-Log "Processing Complete:" -Level INFO
-        $displayProcessedCount = if ($useStreamingMode) { $successCount } else { $processedCount }
-        Write-Log "  Total Files Processed: $displayProcessedCount of $totalFileCount" -Level INFO
-        Write-Log "  Successfully Processed: $successCount" -Level INFO
-        Write-Log "  Failed: $errorCount" -Level INFO
-        $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
-        Write-Log "  Total Size Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
-        
-        # Use appropriate start time and count for rate calculation
-        $startTimeForRate = if ($useStreamingMode) { $scanStartTime } else { $script:startTime }
-        $countForRate = if ($useStreamingMode) { $successCount } else { $processedCount }
-        Write-Log "  Processing Rate: $(Get-ProcessingRate -StartTime $startTimeForRate -ProcessedCount $countForRate)" -Level INFO
-        $elapsedTime = (Get-Date) - $script:startTime
-        $elapsedTimeStr = '{0:hh\:mm\:ss}' -f $elapsedTime
-        Write-Log "  Elapsed Time: $elapsedTimeStr" -Level INFO
-    }
+    Write-Log " " -Level INFO
+    Write-Log "Processing Complete:" -Level INFO
+    Write-Log "  Total Files Processed: $processedCount of $($allFiles.Count)" -Level INFO
+    Write-Log "  Successfully Processed: $successCount" -Level INFO
+    Write-Log "  Failed: $errorCount" -Level INFO
+    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+    Write-Log "  Total Size Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
+    Write-Log "  Processing Rate: $(Get-ProcessingRate -StartTime $script:startTime -ProcessedCount $processedCount)" -Level INFO
+    Write-Log "  Elapsed Time: $elapsedTimeStr" -Level INFO
 
-    # After the main loop, log final progress if not in quiet mode and there were files
-    if (-not $QuietMode -and $totalFileCount -gt 0) {
-        $finalElapsedSeconds = [math]::Round(((Get-Date) - $scanStartTime).TotalSeconds, 1)
-        $finalProcessedCount = if ($useStreamingMode) { $successCount } else { $processedCount }
-        Write-Log "Progress: 100% ($finalProcessedCount of $totalFileCount files) at $finalElapsedSeconds seconds run-time" -Level INFO
-        $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
-        Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
-        Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
-        
-        $finalStartTime = if ($useStreamingMode) { $scanStartTime } else { $processingStartTime }
-        $finalCount = if ($useStreamingMode) { $successCount } else { $processedCount }
-        Write-Log "  Rate: $(Get-ProcessingRate -StartTime $finalStartTime -ProcessedCount $finalCount)" -Level INFO
-        Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
-    }
+    # After the main loop, always log a final progress update at 100% with total elapsed time
+    $finalElapsedSeconds = [math]::Round(((Get-Date) - $processingStartTime).TotalSeconds, 1)
+    Write-Log "Progress: 100% ($processedCount of $($allFiles.Count) files) at $finalElapsedSeconds seconds run-time" -Level INFO
+    $processedSizeGB = [math]::Round($processedSize / 1GB, 2)
+    Write-Log "  Processed: $processedSizeGB GB of $totalSizeGB GB" -Level INFO
+    Write-Log "  Success: $successCount, Errors: $errorCount" -Level INFO
+    Write-Log "  Rate: $(Get-ProcessingRate -StartTime $processingStartTime -ProcessedCount $processedCount)" -Level INFO
+    Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
 
     # --- Smart Empty Directory Cleanup ---
     if ($SkipDirCleanup) {

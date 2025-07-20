@@ -5,6 +5,31 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.5] - 2025-07-20
+
+### Fixed
+- **Critical bug fix**: Uninitialized `$processingStartTime` variable in streaming mode
+  - In streaming mode, `$processingStartTime` was never initialized, causing null reference when calculating processing time
+  - Now always initializes `$processingStartTime` before both streaming and batch processing modes
+  - This was the root cause of "You cannot call a method on a null-valued expression" errors after streaming completion
+
+## [2.2.4] - 2025-07-20
+
+### Fixed
+- **Critical bug fix**: Null reference error in streaming mode when calculating processing rates
+  - In streaming mode, `$processedCount` was not properly tracked, causing null reference errors
+  - Now uses `$successCount` for rate calculations in streaming mode
+  - Fixed all occurrences where processed count is displayed or used in calculations
+  - Affects lines 1792, 1800, 1812, and 1817 in the processing summary sections
+
+## [2.2.3] - 2025-07-20
+
+### Fixed
+- **Critical bug fix**: Undefined variable $elapsedTimeStr causing null reference error
+  - Error occurred in the processing summary section after streaming completion
+  - Variable was being used but never defined in that scope
+  - Now properly calculates and formats elapsed time before use
+
 ## [2.2.2] - 2025-07-20
 
 ### Fixed

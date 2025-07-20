@@ -20,7 +20,7 @@ This guide provides step-by-step instructions for setting up the LogRhythm Archi
 
 ### Required Components
 - **Windows Server** with Task Scheduler service running
-- **ArchiveRetention.ps1** installed in secure location (e.g., `C:\LogRhythm\Scripts\ArchiveRetention\`)
+- **ArchiveRetention.ps1 v2.2.0+** installed in secure location (e.g., `C:\LogRhythm\Scripts\ArchiveRetention\`)
 - **PowerShell 5.1+** installed and execution policy configured
 - **Service Account** with appropriate permissions (recommended) or use of SYSTEM account
 - **Network Share Credentials** (if using UNC paths) pre-configured with `Save-Credential.ps1`
@@ -39,7 +39,7 @@ This guide provides step-by-step instructions for setting up the LogRhythm Archi
 - **Frequency**: Weekly (recommended) or bi-weekly
 - **Day**: Sunday (low activity day)
 - **Time**: 2:00 AM (outside business hours)
-- **Duration**: Allow 4-6 hours for completion on large datasets
+- **Duration**: Allow 2-4 hours for completion on large datasets (v2.2.0 streaming mode is faster)
 
 ### Considerations
 - **Business Hours**: Always run during maintenance windows
@@ -192,7 +192,7 @@ try {
 | **Run only if network available** | Yes | Required for UNC paths |
 | **Stop if idle ends** | No | Allow long-running operations |
 | **Allow start on batteries** | Yes | Laptops/UPS scenarios |
-| **Timeout** | 8 hours | Large datasets need time |
+| **Timeout** | 4-6 hours | v2.2.0 streaming mode is faster |
 | **Restart on failure** | No | Review logs instead |
 
 ### Command Line Arguments
@@ -211,6 +211,13 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scri
 ```cmd
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scripts\ArchiveRetention\ArchiveRetention.ps1' -CredentialTarget 'TARGET_NAME' -RetentionDays DAYS -Execute -LogPath 'C:\Logs\ArchiveRetention\retention.log'"
 ```
+
+**For Scheduled Tasks (v2.2.0+ Recommended):**
+```cmd
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scripts\ArchiveRetention\ArchiveRetention.ps1' -CredentialTarget 'TARGET_NAME' -RetentionDays DAYS -Execute -QuietMode"
+```
+
+> **Note**: The `-QuietMode` parameter is ideal for scheduled tasks as it eliminates progress output for optimal performance.
 
 ---
 
@@ -332,11 +339,12 @@ if ($Task) {
 ### Key Metrics to Monitor
 
 - **Task Execution Status**: Success/Failure
-- **Execution Duration**: Track performance trends
-- **Files Processed**: Count and size of deleted files
+- **Execution Duration**: Track performance trends (v2.2.0 should show improvement)
+- **Files Processed**: Count and size of deleted files (streaming mode processes immediately)
 - **Error Rates**: Failed file deletions
-- **Disk Space Freed**: Storage reclaimed
+- **Disk Space Freed**: Storage reclaimed in real-time
 - **Network Connectivity**: UNC path accessibility
+- **Memory Usage**: Should remain constant with v2.2.0 O(1) streaming mode
 
 ### Maintenance Tasks
 
@@ -428,11 +436,11 @@ $Action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $Arguments
 
 $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $Config.StartTime
 
-$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 8)
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 4)
 
 $Principal = New-ScheduledTaskPrincipal -UserId $Config.ServiceAccount -LogonType Password
 
-Register-ScheduledTask -TaskName $Config.TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Production LogRhythm Archive Retention - 3 year retention policy"
+Register-ScheduledTask -TaskName $Config.TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Production LogRhythm Archive Retention v2.2.0 - 3 year retention policy with streaming deletion"
 ```
 
 ---
