@@ -10,9 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **CRITICAL PERFORMANCE FIX**: Replaced PowerShell `Remove-Item` with `[System.IO.File]::Delete()` for file deletion
   - Previous: ~20 files/sec deletion rate
-  - Expected: 100-500 files/sec deletion rate (5-25x improvement)
+  - Expected: 100-500 files/sec deletion rate (5-25x improvement on local drives)
+  - Network operations still limited by SMB latency (~15-20 files/sec single-threaded)
   - This fix implements the optimization specified in "Optimized Plan.md"
   - Affects both streaming mode and batch processing
+
+### Added
+- Performance tip when network path detected without parallel processing
+- Recommendation to use `-ParallelProcessing -ThreadCount 8` for network shares
+- Expected network performance: 120-160 files/sec with 8 threads
 
 ### Changed
 - File deletion now uses direct .NET API for maximum performance

@@ -1377,6 +1377,15 @@ try {
     Write-Log "  Progress Mode: $progressMode" -Level INFO
     Write-Log "  Smart Directory Cleanup: Enabled (tracks modified directories)" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
+    
+    # Performance tip for network operations
+    if (-not $ParallelProcessing -and $ArchivePath -like "\\*") {
+        Write-Log "PERFORMANCE TIP: For network paths, use -ParallelProcessing -ThreadCount 8 for 4-8x faster deletion" -Level INFO
+        if ($script:showProgress) {
+            Write-Host "`n  ⚡ PERFORMANCE TIP: Add -ParallelProcessing -ThreadCount 8 for much faster network deletion!" -ForegroundColor Yellow
+            Write-Host "     Example: .\ArchiveRetention.ps1 ... -ParallelProcessing -ThreadCount 8 -BatchSize 200" -ForegroundColor DarkYellow
+        }
+    }
 
     # Before file enumeration, add robust path validation and error handling.
     if (-not (Test-Path $ArchivePath)) {
