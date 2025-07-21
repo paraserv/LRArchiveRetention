@@ -5,6 +5,30 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] - 2025-07-21
+
+### Fixed
+- **StreamWriter disposal**: Added proper closure after streaming mode completion
+  - In streaming mode, the StreamWriter was kept open throughout the entire execution
+  - Now closes StreamWriter after streaming deletion completes, before directory cleanup
+  - Also closes StreamWriter before directory cleanup in non-streaming mode
+  - This fully resolves the "file is being used by another process" error
+
+## [2.3.2] - 2025-07-21
+
+### Fixed
+- **Critical fix**: Retention action log summary now properly written
+  - StreamWriter was not being closed before Complete-ScriptExecution tried to append summary
+  - Added explicit StreamWriter disposal before all Complete-ScriptExecution calls
+  - Summary now includes completion time, file/directory counts, space freed, and status
+
+## [2.3.1] - 2025-07-20
+
+### Fixed
+- **Retention Action Log**: Now properly writes completion summary with totals
+- **Dry-run Mode**: Fixed hanging issue - now shows proper completion summary
+- **Complete-ScriptExecution**: Fixed parameter handling to accept summary data
+
 ## [2.3.0] - 2025-07-20
 
 ### Added

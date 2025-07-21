@@ -221,7 +221,10 @@ function Complete-ScriptExecution {
     [CmdletBinding()]
     param(
         [bool]$Success = $false,
-        [string]$Message = $null
+        [string]$Message = $null,
+        [int]$FilesDeleted = 0,
+        [int]$DirectoriesRemoved = 0,
+        [double]$SpaceFreedGB = 0
     )
 
     $defaultSuccessMsg = "Script completed successfully"
@@ -264,6 +267,26 @@ function Complete-ScriptExecution {
             Write-Log $statusLine -Level ERROR
             if (-not [string]::IsNullOrWhiteSpace($Message)) {
                 Write-Log " - Reason: $Message" -Level ERROR
+            }
+        }
+        
+        # Write summary to retention action log if in execute mode
+        if ($script:DeletionLogPath -and (Test-Path $script:DeletionLogPath)) {
+            try {
+                $completionTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                $summaryLines = @(
+                    "",
+                    "# Completion Summary",
+                    "# Completed at: $completionTime",
+                    "# Total files deleted: $FilesDeleted",
+                    "# Total directories removed: $DirectoriesRemoved",
+                    "# Total space freed: $SpaceFreedGB GB",
+                    "# Total execution time: $elapsedTimeStr",
+                    "# Status: $(if ($Success) { 'SUCCESS' } else { 'FAILED' })"
+                )
+                Add-Content -Path $script:DeletionLogPath -Value $summaryLines -Encoding UTF8
+            } catch {
+                Write-Log "Failed to write summary to retention log: $($_.Exception.Message)" -Level WARNING
             }
         }
     } catch {
@@ -415,6 +438,21 @@ if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
         if ($null -eq $credentialInfo) {
             $errorMsg = "Failed to retrieve saved credential for target '$CredentialTarget'. Please run Save-Credential.ps1 first."
             Write-Log $errorMsg -Level FATAL
+            
+            # Close deletion log writer before completion to allow summary to be written
+            if ($script:DeletionLogWriter) {
+                try {
+                    if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                        $script:DeletionLogWriter.Flush()
+                        $script:DeletionLogWriter.Close()
+                        $script:DeletionLogWriter.Dispose()
+                        $script:DeletionLogWriter = $null
+                    }
+                } catch {
+                    Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+                }
+            }
+            
             Complete-ScriptExecution -Success $false -Message $errorMsg
             exit 1
         }
@@ -428,7 +466,22 @@ if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
     } catch {
         $errorMsg = "Failed to map network drive using credential '$CredentialTarget'. Error: $($_.Exception.Message)"
         Write-Log $errorMsg -Level FATAL
-        Complete-ScriptExecution -Success $false -Message $errorMsg
+        
+        # Close deletion log writer before completion to allow summary to be written
+        if ($script:DeletionLogWriter) {
+            try {
+                if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                    $script:DeletionLogWriter.Flush()
+                    $script:DeletionLogWriter.Close()
+                    $script:DeletionLogWriter.Dispose()
+                    $script:DeletionLogWriter = $null
+                }
+            } catch {
+                Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+            }
+        }
+        
+        Complete-ScriptExecution -Success $false -Message $errorMsg -FilesDeleted 0 -DirectoriesRemoved 0 -SpaceFreedGB 0
         exit 1
     }
 }
@@ -1191,7 +1244,15 @@ function Invoke-ParallelFileProcessing {
                         # Log to deletion file if path provided
                         if ($DeletionLogPath) {
                             try {
-                                Add-Content -Path $DeletionLogPath -Value $FileInfo.FullName -Encoding UTF8
+                                # Use thread-safe file writing
+                                $mutex = [System.Threading.Mutex]::new($false, "Global\ArchiveRetentionLogMutex")
+                                try {
+                                    $mutex.WaitOne(1000) | Out-Null
+                                    Add-Content -Path $DeletionLogPath -Value $FileInfo.FullName -Encoding UTF8
+                                } finally {
+                                    $mutex.ReleaseMutex()
+                                    $mutex.Dispose()
+                                }
                             } catch {
                                 # Ignore deletion log errors in parallel context
                             }
@@ -1750,6 +1811,37 @@ try {
         Write-Log "  Successfully deleted: $successCount files" -Level INFO
         Write-Log "  Failed: $errorCount files" -Level INFO
         Write-Log "  Space freed: $([math]::Round($processedSize / 1GB, 2)) GB" -Level INFO
+        
+        # Close deletion log writer after streaming mode to allow summary to be written
+        if ($script:DeletionLogWriter) {
+            try {
+                if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                    $script:DeletionLogWriter.Flush()
+                    $script:DeletionLogWriter.Close()
+                    $script:DeletionLogWriter.Dispose()
+                    $script:DeletionLogWriter = $null
+                    Write-Log "Closed deletion log writer after streaming completion" -Level DEBUG
+                }
+            } catch {
+                Write-Log "Error closing deletion log writer after streaming: $($_.Exception.Message)" -Level WARNING
+            }
+        }
+    } elseif (-not $Execute -and $allFiles.Count -gt 0) {
+        # Dry-run mode - just show summary
+        Write-Log " " -Level INFO
+        Write-Log "DRY-RUN SUMMARY:" -Level INFO
+        Write-Log "  Total files that would be deleted: $totalFileCount" -Level INFO
+        Write-Log "  Total size that would be freed: $totalSizeGB GB" -Level INFO
+        Write-Log "  Files are older than: $RetentionDays days (cutoff: $cutoffDateStr)" -Level INFO
+        if ($script:showProgress) {
+            Write-Host " " -ForegroundColor White
+            Write-Host "  DRY-RUN COMPLETE: $totalFileCount files ($totalSizeGB GB) would be deleted" -ForegroundColor Cyan
+            Write-Host "  Run with -Execute flag to actually delete these files" -ForegroundColor Yellow
+        }
+        # Set counts for summary
+        $processedCount = $totalFileCount
+        $successCount = 0
+        $errorCount = 0
     } elseif ($ParallelProcessing -and $allFiles.Count -gt 0) {
         # Choose processing method based on ParallelProcessing flag
         Write-Log "Using parallel processing with $ThreadCount threads for maximum performance..." -Level INFO
@@ -1939,6 +2031,21 @@ try {
         Write-Log "  Rate: $(Get-ProcessingRate -StartTime $finalStartTime -ProcessedCount $finalCount)" -Level INFO
         Write-Log "  Estimated time remaining: 0 minutes" -Level INFO
     }
+    
+    # Close deletion log writer before directory cleanup to allow summary to be written
+    if ($script:DeletionLogWriter -and -not $useStreamingMode) {
+        try {
+            if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                $script:DeletionLogWriter.Flush()
+                $script:DeletionLogWriter.Close()
+                $script:DeletionLogWriter.Dispose()
+                $script:DeletionLogWriter = $null
+                Write-Log "Closed deletion log writer before directory cleanup" -Level DEBUG
+            }
+        } catch {
+            Write-Log "Error closing deletion log writer before cleanup: $($_.Exception.Message)" -Level WARNING
+        }
+    }
 
     # --- Smart Empty Directory Cleanup ---
     if ($SkipDirCleanup) {
@@ -2030,7 +2137,26 @@ try {
     }
     # --- End Empty Directory Cleanup ---
 
-    Complete-ScriptExecution -Success $true
+    # Pass summary data to completion function
+    $totalFilesDeleted = if ($Execute) { $successCount } else { 0 }
+    $totalDirsRemoved = if ($Execute -and -not $SkipDirCleanup) { $removedCount } else { 0 }
+    $totalSpaceFreed = [math]::Round($processedSize / 1GB, 2)
+    
+    # Close deletion log writer before completion to allow summary to be written
+    if ($script:DeletionLogWriter) {
+        try {
+            if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                $script:DeletionLogWriter.Flush()
+                $script:DeletionLogWriter.Close()
+                $script:DeletionLogWriter.Dispose()
+                $script:DeletionLogWriter = $null
+            }
+        } catch {
+            Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+        }
+    }
+    
+    Complete-ScriptExecution -Success $true -FilesDeleted $totalFilesDeleted -DirectoriesRemoved $totalDirsRemoved -SpaceFreedGB $totalSpaceFreed
 }
 catch {
     $errorMsg = if ([string]::IsNullOrWhiteSpace($_.Exception.Message)) { "An unknown unhandled error occurred" } else { $_.Exception.Message }
@@ -2043,7 +2169,22 @@ catch {
         Write-Log "Diagnostic: scriptStartTime type: $($scriptStartTime?.GetType().FullName), value: $scriptStartTime" -Level ERROR
         Write-Log "Diagnostic: script:endTime type: $($script:endTime?.GetType().FullName), value: $script:endTime" -Level ERROR
     }
-    Complete-ScriptExecution -Success $false -Message $errorMsg
+    
+    # Close deletion log writer before completion to allow summary to be written
+    if ($script:DeletionLogWriter) {
+        try {
+            if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                $script:DeletionLogWriter.Flush()
+                $script:DeletionLogWriter.Close()
+                $script:DeletionLogWriter.Dispose()
+                $script:DeletionLogWriter = $null
+            }
+        } catch {
+            Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+        }
+    }
+    
+    Complete-ScriptExecution -Success $false -Message $errorMsg -FilesDeleted 0 -DirectoriesRemoved 0 -SpaceFreedGB 0
     exit 1
 }
 finally {
@@ -2065,7 +2206,20 @@ finally {
     }
 
     if (-not $script:completed) {
-        Complete-ScriptExecution -Success $true
+        # Close deletion log writer before completion to allow summary to be written
+        if ($script:DeletionLogWriter) {
+            try {
+                if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                    $script:DeletionLogWriter.Flush()
+                    $script:DeletionLogWriter.Close()
+                    $script:DeletionLogWriter.Dispose()
+                    $script:DeletionLogWriter = $null
+                }
+            } catch {
+                Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+            }
+        }
+        Complete-ScriptExecution -Success $true -FilesDeleted 0 -DirectoriesRemoved 0 -SpaceFreedGB 0
     }
 }
 
