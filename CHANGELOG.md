@@ -5,6 +5,23 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] - 2025-07-22
+
+### Fixed
+- **Parallel retention logging**: Fixed issue where retention logs were not written in parallel mode
+  - Changed from concurrent file writes to collecting deleted files and writing from main thread
+  - Prevents file access conflicts between StreamWriter and parallel threads
+  - Ensures all deleted files are properly logged in retention action logs
+- **Ctrl-C handling**: Script now properly detects and reports manual termination
+  - Added trap handler for pipeline stopped exceptions
+  - Shows "TERMINATED" status instead of "SUCCESS" when interrupted
+  - Logs show clear indication of user interruption in both main and retention logs
+  - Properly closes resources and saves progress before exiting
+
+### Changed
+- Improved status reporting to distinguish between SUCCESS, FAILED, and TERMINATED states
+- Enhanced Complete-ScriptExecution to handle termination scenarios
+
 ## [2.3.3] - 2025-07-21
 
 ### Fixed

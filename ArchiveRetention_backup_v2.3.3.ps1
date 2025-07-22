@@ -254,14 +254,7 @@ function Complete-ScriptExecution {
         }
 
         # Log completion status
-        if ($script:terminated) {
-            $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
-            $statusLine = "SCRIPT TERMINATED BY USER (local: $localTime, elapsed: $elapsedTimeStr)"
-            Write-Log $statusLine -Level WARNING
-            if (-not [string]::IsNullOrWhiteSpace($Message)) {
-                Write-Log " - $Message" -Level WARNING
-            }
-        } elseif ($Success) {
+        if ($Success) {
             $localTime = $scriptCompleted.ToString('yyyy-MM-dd HH:mm:ss.fff')
             $statusLine = "SCRIPT COMPLETED SUCCESSFULLY (local: $localTime, elapsed: $elapsedTimeStr)"
             Write-Log $statusLine -Level INFO
@@ -289,7 +282,7 @@ function Complete-ScriptExecution {
                     "# Total directories removed: $DirectoriesRemoved",
                     "# Total space freed: $SpaceFreedGB GB",
                     "# Total execution time: $elapsedTimeStr",
-                    "# Status: $(if ($script:terminated) { 'TERMINATED' } elseif ($Success) { 'SUCCESS' } else { 'FAILED' })"
+                    "# Status: $(if ($Success) { 'SUCCESS' } else { 'FAILED' })"
                 )
                 Add-Content -Path $script:DeletionLogPath -Value $summaryLines -Encoding UTF8
             } catch {
@@ -329,44 +322,6 @@ $ErrorActionPreference = 'Stop'  # Make errors terminating by default
 
 # Set script start time for accurate timing in summary (local time only)
 $script:startTime = Get-Date
-
-# Initialize termination flag
-$script:terminated = $false
-
-# Trap handler for Ctrl-C interruption
-trap {
-    if ($_.Exception.GetType().Name -eq "PipelineStoppedException" -or 
-        $_.Exception.Message -match "pipeline.*stopped|cancelled|terminated|The pipeline has been stopped|The running command stopped") {
-        Write-Host "`nScript execution interrupted by user (Ctrl+C)" -ForegroundColor Yellow
-        Write-Log "Script execution interrupted by user (Ctrl+C)" -Level WARNING
-        $script:terminated = $true
-        
-        # Set completion values
-        $totalFilesDeleted = if ($null -ne $successCount) { $successCount } else { 0 }
-        $totalDirsRemoved = if ($null -ne $removedCount) { $removedCount } else { 0 }
-        $totalSpaceFreed = if ($null -ne $processedSize) { [math]::Round($processedSize / 1GB, 2) } else { 0 }
-        
-        # Close deletion log writer
-        if ($script:DeletionLogWriter) {
-            try {
-                if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
-                    $script:DeletionLogWriter.Flush()
-                    $script:DeletionLogWriter.Close()
-                    $script:DeletionLogWriter.Dispose()
-                    $script:DeletionLogWriter = $null
-                }
-            } catch {}
-        }
-        
-        # Call completion with terminated flag
-        Complete-ScriptExecution -Success $false -Message "Script terminated by user (Ctrl+C)" -FilesDeleted $totalFilesDeleted -DirectoriesRemoved $totalDirsRemoved -SpaceFreedGB $totalSpaceFreed
-        exit 1
-    }
-    else {
-        # Re-throw other exceptions
-        throw $_
-    }
-}
 
 # --- Start of Script ---
 
@@ -1286,8 +1241,22 @@ function Invoke-ParallelFileProcessing {
                         $success = $true
                         $result.Success = $true
                         
-                        # Don't write to deletion log here - will be handled by main thread
-                        # Just mark the file as successfully deleted
+                        # Log to deletion file if path provided
+                        if ($DeletionLogPath) {
+                            try {
+                                # Use thread-safe file writing
+                                $mutex = [System.Threading.Mutex]::new($false, "Global\ArchiveRetentionLogMutex")
+                                try {
+                                    $mutex.WaitOne(1000) | Out-Null
+                                    Add-Content -Path $DeletionLogPath -Value $FileInfo.FullName -Encoding UTF8
+                                } finally {
+                                    $mutex.ReleaseMutex()
+                                    $mutex.Dispose()
+                                }
+                            } catch {
+                                # Ignore deletion log errors in parallel context
+                            }
+                        }
                     }
                     catch {
                         if ($attempt -ge $MaxRetries) {
@@ -1388,21 +1357,12 @@ function Invoke-ParallelFileProcessing {
     
     Write-Log "Parallel processing completed: $successCount successful, $errorCount errors in $([Math]::Round($finalElapsed.TotalSeconds, 1)) seconds ($finalRate files/sec)" -Level INFO
     
-    # Collect successfully deleted files
-    $deletedFiles = @()
-    foreach ($result in $results) {
-        if ($result.Success -and $Execute) {
-            $deletedFiles += $result.FilePath
-        }
-    }
-    
     return @{
         SuccessCount = $successCount
         ErrorCount = $errorCount
         ProcessedSize = $processedSize
         ModifiedDirectories = $modifiedDirs
         Duration = $finalElapsed
-        DeletedFiles = $deletedFiles
     }
 }
 
@@ -1617,14 +1577,6 @@ try {
                                     # Process batch in parallel
                                     $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
                                     
-                                    # Write deleted files to retention log
-                                    if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-                                        foreach ($deletedFile in $batchResult.DeletedFiles) {
-                                            $script:DeletionLogWriter.WriteLine($deletedFile)
-                                        }
-                                        $script:DeletionLogWriter.Flush()
-                                    }
-                                    
                                     # Aggregate results
                                     $successCount += $batchResult.SuccessCount
                                     $errorCount += $batchResult.ErrorCount
@@ -1809,14 +1761,6 @@ try {
         # Process batch in parallel
         $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
         
-        # Write deleted files to retention log
-        if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-            foreach ($deletedFile in $batchResult.DeletedFiles) {
-                $script:DeletionLogWriter.WriteLine($deletedFile)
-            }
-            $script:DeletionLogWriter.Flush()
-        }
-        
         # Aggregate results
         $successCount += $batchResult.SuccessCount
         $errorCount += $batchResult.ErrorCount
@@ -1913,14 +1857,6 @@ try {
             
             # Use parallel processing for the batch
             $batchResult = Invoke-ParallelFileProcessing -Files $currentBatch -Execute $Execute -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
-            
-            # Write deleted files to retention log
-            if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-                foreach ($deletedFile in $batchResult.DeletedFiles) {
-                    $script:DeletionLogWriter.WriteLine($deletedFile)
-                }
-                $script:DeletionLogWriter.Flush()
-            }
             
             # Aggregate results
             $successCount += $batchResult.SuccessCount
