@@ -196,10 +196,10 @@ Get-SavedCredentials | Where-Object { $_.Target -eq "NAS_CREDS" }
 source winrm_env/bin/activate
 
 # Dry-run: 95,558 files (4.67 TB) - 15 month retention
-python3 winrm_helper.py nas_dry_run 456
+python3 tools/winrm_helper.py nas_dry_run 456
 
 # Execute: 0% error rate, 35 files/sec performance
-python3 winrm_helper.py nas_execute 456
+python3 tools/winrm_helper.py nas_execute 456
 ```
 
 **Proven Performance Metrics (v2.2.0)**:
@@ -213,13 +213,13 @@ python3 winrm_helper.py nas_execute 456
 **winrm_helper.py Usage** (Recommended for all operations):
 ```bash
 # Quick tests
-python3 winrm_helper.py local           # Test with local path
-python3 winrm_helper.py nas             # Test NAS credentials
-python3 winrm_helper.py parameters      # Test v1.2.0 features
+python3 tools/winrm_helper.py local           # Test with local path
+python3 tools/winrm_helper.py nas             # Test NAS credentials
+python3 tools/winrm_helper.py parameters      # Test v1.2.0 features
 
 # Production operations
-python3 winrm_helper.py nas_dry_run 456  # Dry-run with custom retention
-python3 winrm_helper.py nas_execute 456  # Execute with custom retention
+python3 tools/winrm_helper.py nas_dry_run 456  # Dry-run with custom retention
+python3 tools/winrm_helper.py nas_execute 456  # Execute with custom retention
 ```
 
 **Progress Parameters** (v2.0.0+, enhanced in v2.2.0):

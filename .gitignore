@@ -11,6 +11,8 @@ winrm_env/
 venv/
 env/
 .venv/
+venv_*/
+*_env/
 __pycache__/
 *.pyc
 *.pyo
