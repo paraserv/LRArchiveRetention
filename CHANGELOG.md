@@ -5,6 +5,23 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2025-07-22
+
+### Fixed
+- **Finally block completion**: Fixed hardcoded zero values in finally block
+  - Now uses actual execution values for files deleted, directories removed, and space freed
+  - Script-level variables track progress throughout execution
+  - Ensures accurate reporting even when script is interrupted
+- **Enhanced Ctrl-C detection**: Improved termination detection
+  - Added more exception types to trap handler
+  - Added PowerShell.Exiting event handler
+  - Script-level variables updated during streaming for accurate final counts
+
+### Changed
+- Added script-level tracking variables that persist across entire execution
+- Finally block now uses actual values instead of hardcoded zeros
+- Streaming mode updates global counters in real-time
+
 ## [2.3.4] - 2025-07-22
 
 ### Fixed

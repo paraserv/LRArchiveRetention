@@ -333,18 +333,31 @@ $script:startTime = Get-Date
 # Initialize termination flag
 $script:terminated = $false
 
+# Initialize global counters for tracking progress
+$script:totalFilesDeleted = 0
+$script:totalDirsRemoved = 0
+$script:totalSpaceFreed = 0
+
 # Trap handler for Ctrl-C interruption
 trap {
-    if ($_.Exception.GetType().Name -eq "PipelineStoppedException" -or 
-        $_.Exception.Message -match "pipeline.*stopped|cancelled|terminated|The pipeline has been stopped|The running command stopped") {
+    $exceptionType = $_.Exception.GetType().Name
+    $exceptionMessage = $_.Exception.Message
+    
+    # Check for various termination conditions
+    if ($exceptionType -eq "PipelineStoppedException" -or 
+        $exceptionType -eq "OperationCanceledException" -or
+        $exceptionType -eq "ThreadAbortException" -or
+        $exceptionMessage -match "pipeline.*stopped|cancelled|terminated|The pipeline has been stopped|The running command stopped|operation.*cancel" -or
+        $_.CategoryInfo.Category -eq "OperationStopped") {
+        
         Write-Host "`nScript execution interrupted by user (Ctrl+C)" -ForegroundColor Yellow
-        Write-Log "Script execution interrupted by user (Ctrl+C)" -Level WARNING
+        Write-Log "Script execution interrupted by user (Ctrl+C) - Exception: $exceptionType" -Level WARNING
         $script:terminated = $true
         
-        # Set completion values
-        $totalFilesDeleted = if ($null -ne $successCount) { $successCount } else { 0 }
-        $totalDirsRemoved = if ($null -ne $removedCount) { $removedCount } else { 0 }
-        $totalSpaceFreed = if ($null -ne $processedSize) { [math]::Round($processedSize / 1GB, 2) } else { 0 }
+        # Update script-level variables with current values
+        if ($null -ne $successCount) { $script:totalFilesDeleted = $successCount }
+        if ($null -ne $removedCount) { $script:totalDirsRemoved = $removedCount }
+        if ($null -ne $processedSize) { $script:totalSpaceFreed = [math]::Round($processedSize / 1GB, 2) }
         
         # Close deletion log writer
         if ($script:DeletionLogWriter) {
@@ -359,7 +372,7 @@ trap {
         }
         
         # Call completion with terminated flag
-        Complete-ScriptExecution -Success $false -Message "Script terminated by user (Ctrl+C)" -FilesDeleted $totalFilesDeleted -DirectoriesRemoved $totalDirsRemoved -SpaceFreedGB $totalSpaceFreed
+        Complete-ScriptExecution -Success $false -Message "Script terminated by user (Ctrl+C)" -FilesDeleted $script:totalFilesDeleted -DirectoriesRemoved $script:totalDirsRemoved -SpaceFreedGB $script:totalSpaceFreed
         exit 1
     }
     else {
@@ -369,6 +382,15 @@ trap {
 }
 
 # --- Start of Script ---
+
+# Register Ctrl+C handler
+$null = [console]::TreatControlCAsInput = $false
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    if (-not $script:completed) {
+        $script:terminated = $true
+        Write-Host "`nScript terminated by user" -ForegroundColor Yellow
+    }
+} | Out-Null
 
 # -------------------------------------------------------------
 # Single-instance lock (prevents concurrent executions)
@@ -1631,6 +1653,10 @@ try {
                                     $processedSize += $batchResult.ProcessedSize
                                     $processedCount += $batchToProcess.Count
                                     
+                                    # Update script-level variables
+                                    $script:totalFilesDeleted = $successCount
+                                    $script:totalSpaceFreed = [math]::Round($processedSize / 1GB, 2)
+                                    
                                     # Merge modified directories
                                     foreach ($dir in $batchResult.ModifiedDirectories.Keys) {
                                         $modifiedDirectories[$dir] = $true
@@ -2206,6 +2232,11 @@ try {
     $totalDirsRemoved = if ($Execute -and -not $SkipDirCleanup) { $removedCount } else { 0 }
     $totalSpaceFreed = [math]::Round($processedSize / 1GB, 2)
     
+    # Update script-level variables for finally block
+    $script:totalFilesDeleted = $totalFilesDeleted
+    $script:totalDirsRemoved = $totalDirsRemoved
+    $script:totalSpaceFreed = $totalSpaceFreed
+    
     # Close deletion log writer before completion to allow summary to be written
     if ($script:DeletionLogWriter) {
         try {
@@ -2283,7 +2314,12 @@ finally {
                 Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
             }
         }
-        Complete-ScriptExecution -Success $true -FilesDeleted 0 -DirectoriesRemoved 0 -SpaceFreedGB 0
+        # Use actual values from script execution
+        $finalFilesDeleted = if ($null -ne $script:totalFilesDeleted) { $script:totalFilesDeleted } elseif ($null -ne $successCount) { $successCount } else { 0 }
+        $finalDirsRemoved = if ($null -ne $script:totalDirsRemoved) { $script:totalDirsRemoved } elseif ($null -ne $removedCount) { $removedCount } else { 0 }
+        $finalSpaceFreed = if ($null -ne $script:totalSpaceFreed) { $script:totalSpaceFreed } elseif ($null -ne $processedSize) { [math]::Round($processedSize / 1GB, 2) } else { 0 }
+        
+        Complete-ScriptExecution -Success $true -FilesDeleted $finalFilesDeleted -DirectoriesRemoved $finalDirsRemoved -SpaceFreedGB $finalSpaceFreed
     }
 }
 
