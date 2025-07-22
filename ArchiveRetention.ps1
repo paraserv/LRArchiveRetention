@@ -232,6 +232,20 @@ function Complete-ScriptExecution {
         # Mark script as completed
         $script:completed = $true
         $script:endTime = Get-Date
+        
+        # Close deletion log writer first to allow summary to be appended
+        if ($script:DeletionLogWriter) {
+            try {
+                if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                    $script:DeletionLogWriter.Flush()
+                    $script:DeletionLogWriter.Close()
+                    $script:DeletionLogWriter.Dispose()
+                    $script:DeletionLogWriter = $null
+                }
+            } catch {
+                Write-Log "Error closing deletion log writer in Complete-ScriptExecution: $($_.Exception.Message)" -Level WARNING
+            }
+        }
 
         # Calculate elapsed time
         $scriptCompleted = $script:endTime
@@ -383,8 +397,15 @@ trap {
 
 # --- Start of Script ---
 
-# Register Ctrl+C handler
-$null = [console]::TreatControlCAsInput = $false
+# Register Ctrl+C handler (only in interactive sessions)
+if ([Environment]::UserInteractive -and $Host.UI.RawUI.KeyAvailable -ne $null) {
+    try {
+        $null = [console]::TreatControlCAsInput = $false
+    } catch {
+        # Ignore console errors in non-interactive sessions
+    }
+}
+
 Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
     if (-not $script:completed) {
         $script:terminated = $true
@@ -738,12 +759,19 @@ function Close-Logging {
             if ($script:DeletionLogWriter -and -not $script:DeletionLogWriter.BaseStream.IsClosed) {
                 $script:DeletionLogWriter.Flush()
                 $script:DeletionLogWriter.Close()
+                $script:DeletionLogWriter.Dispose()
+                $script:DeletionLogWriter = $null
             }
-            $lines = Get-Content -Path $script:DeletionLogPath
-            if ($lines.Count -le 7) {  # Only header present
-                Add-Content -Path $script:DeletionLogPath -Value "# No files were deleted or processed during this run."
+            # Check if we should add a "no files" message
+            if (Test-Path $script:DeletionLogPath) {
+                $lines = Get-Content -Path $script:DeletionLogPath
+                if ($lines.Count -le 7) {  # Only header present
+                    Add-Content -Path $script:DeletionLogPath -Value "# No files were deleted or processed during this run."
+                }
             }
-        } catch {}
+        } catch {
+            Write-Log "Error in Close-Logging deletion log handling: $($_.Exception.Message)" -Level WARNING
+        }
     }
 }
 
