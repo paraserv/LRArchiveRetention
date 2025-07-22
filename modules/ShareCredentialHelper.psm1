@@ -1240,7 +1240,17 @@ function Remove-ShareCredential {
             return $false
         }
 
-        if ($PSCmdlet.ShouldProcess($Target, "Remove stored credential")) {
+        # Handle ShouldProcess more carefully
+        try {
+            if ($PSCmdlet.ShouldProcess($Target, "Remove stored credential")) {
+                Remove-Item -Path $credentialFile -Force -ErrorAction Stop
+                Write-Log "Successfully removed credential for target: $Target" -Level SUCCESS
+                return $true
+            }
+        }
+        catch [System.Management.Automation.RuntimeException] {
+            # If ShouldProcess fails (e.g., in non-interactive mode), just proceed
+            Write-Log "Proceeding with credential removal (non-interactive mode)" -Level DEBUG
             Remove-Item -Path $credentialFile -Force -ErrorAction Stop
             Write-Log "Successfully removed credential for target: $Target" -Level SUCCESS
             return $true
@@ -1251,6 +1261,19 @@ function Remove-ShareCredential {
     catch {
         $errorMsg = "Failed to remove credential for target '$Target': $_"
         Write-Log $errorMsg -Level ERROR
+        
+        # Attempt direct deletion as fallback
+        if (Test-Path -Path $credentialFile) {
+            try {
+                Remove-Item -Path $credentialFile -Force -ErrorAction Stop
+                Write-Log "Successfully removed credential file directly: $Target" -Level WARNING
+                return $true
+            }
+            catch {
+                Write-Log "Direct deletion also failed: $_" -Level ERROR
+            }
+        }
+        
         throw $errorMsg
     }
 }

@@ -42,6 +42,9 @@
 .PARAMETER CredentialTarget
     The name of a credential previously saved with the Save-Credential.ps1 helper script. When this is used, the script will connect to the network share associated with that credential, and the -ArchivePath parameter is not needed.
 
+.PARAMETER ForceClearLock
+    Force clear the lock file if no other ArchiveRetention processes are running. Use this when a previous run crashed and left an orphaned lock file.
+
 .EXAMPLE
     .\ArchiveRetention.ps1 -ArchivePath "\\server\share" -RetentionDays 90
     (Dry run: shows summary of what would be deleted)
@@ -57,6 +60,10 @@
 .EXAMPLE
     .\ArchiveRetention.ps1 -CredentialTarget "LR_NAS" -RetentionDays 180 -Execute
     (Connects to the network share associated with the 'LR_NAS' credential and deletes files older than 180 days.)
+
+.EXAMPLE
+    .\ArchiveRetention.ps1 -ArchivePath "D:\Archives" -RetentionDays 90 -ForceClearLock
+    (Clears orphaned lock file if no other instances are running, then performs dry run)
 
 .NOTES
     Requires PowerShell 5.1 or later
@@ -133,10 +140,22 @@ param(
     [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Enable parallel file processing using runspaces.")]
     [switch]$ParallelProcessing,
 
-    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Number of parallel threads for file operations (default: 4, max: 16).")]
-    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Number of parallel threads for file operations (default: 4, max: 16).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Force sequential (single-threaded) processing.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Force sequential (single-threaded) processing.")]
+    [switch]$Sequential,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Number of parallel threads for file operations (default: 8, max: 16).")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Number of parallel threads for file operations (default: 8, max: 16).")]
     [ValidateRange(1, 16)]
-    [int]$ThreadCount = 4,
+    [int]$ThreadCount = 8,
+
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Force clear lock file if no other instances are running.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Force clear lock file if no other instances are running.")]
+    [switch]$ForceClearLock,
+    
+    [Parameter(Mandatory = $false, ParameterSetName = 'LocalPath', HelpMessage = "Force kill all other ArchiveRetention processes and proceed.")]
+    [Parameter(Mandatory = $false, ParameterSetName = 'NetworkShare', HelpMessage = "Force kill all other ArchiveRetention processes and proceed.")]
+    [switch]$Force,
 
     # --- Help Parameter ---
     [Parameter(ParameterSetName = 'Help')]
@@ -152,7 +171,7 @@ function Write-Log {
         [string]$Message = " ",
 
         [Parameter(Position=1)]
-        [ValidateSet('DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL', 'VERBOSE')]
+        [ValidateSet('DEBUG', 'INFO', 'WARNING', 'ERROR', 'FATAL', 'VERBOSE', 'SUCCESS')]
         [string]$Level = 'INFO',
 
         [switch]$NoConsoleOutput
@@ -182,6 +201,7 @@ function Write-Log {
             'INFO'    { Write-Host $logMessage -ForegroundColor White }
             'DEBUG'   { Write-Debug $logMessage }
             'FATAL'   { Write-Host $logMessage -BackgroundColor Red -ForegroundColor White }
+            'SUCCESS' { Write-Host $logMessage -ForegroundColor Green }
             'VERBOSE' { if ($VerbosePreference -eq 'Continue') { Write-Host $logMessage -ForegroundColor Gray } }
             default   { Write-Host $logMessage }
         }
@@ -339,7 +359,8 @@ if ($MyInvocation.BoundParameters.Count -eq 0) {
 
 # Set script preferences
 $ConfirmPreference = 'None'  # Disable confirmation prompts
-$ErrorActionPreference = 'Stop'  # Make errors terminating by default
+$ErrorActionPreference = 'Continue'  # Don't terminate on non-critical errors
+$script:OriginalErrorActionPreference = $ErrorActionPreference  # Save for critical sections
 
 # Set script start time for accurate timing in summary (local time only)
 $script:startTime = Get-Date
@@ -447,20 +468,180 @@ function Test-StaleLock {
     return $false
 }
 
-# Check for and clean up stale locks first
-Test-StaleLock -LockFilePath $script:LockFilePath | Out-Null
-
-# Also check for running ArchiveRetention processes
-$runningProcesses = Get-WmiObject Win32_Process | Where-Object { 
-    $_.CommandLine -like "*ArchiveRetention.ps1*" -and $_.ProcessId -ne $PID 
-}
-if ($runningProcesses) {
-    Write-Log "Found existing ArchiveRetention.ps1 process(es) running:" -Level WARNING
-    foreach ($proc in $runningProcesses) {
-        Write-Log "  PID: $($proc.ProcessId), Command: $($proc.CommandLine -replace '^(.{100}).*', '$1...')" -Level WARNING
+# Handle Force parameter - kill other ArchiveRetention processes
+if ($Force) {
+    Write-Log "Force parameter specified. Checking for other ArchiveRetention processes..." -Level WARNING
+    
+    try {
+        # Find all PowerShell processes running ArchiveRetention except current one
+        $processesToKill = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop | 
+            Where-Object { 
+                $_.CommandLine -like "*ArchiveRetention.ps1*" -and 
+                $_.ProcessId -ne $PID 
+            }
+        
+        if ($processesToKill.Count -gt 0) {
+            Write-Log "Found $($processesToKill.Count) ArchiveRetention process(es) to terminate:" -Level WARNING
+            foreach ($proc in $processesToKill) {
+                try {
+                    Write-Log "  Terminating PID $($proc.ProcessId)..." -Level WARNING
+                    Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+                    Write-Log "  Process $($proc.ProcessId) terminated." -Level SUCCESS
+                } catch {
+                    Write-Log "  Failed to terminate process $($proc.ProcessId): $_" -Level ERROR
+                }
+            }
+            
+            # Clean up any orphaned lock files
+            if (Test-Path $script:LockFilePath) {
+                Write-Log "Removing orphaned lock file..." -Level WARNING
+                Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+                Write-Log "Lock file removed." -Level SUCCESS
+            }
+            
+            # Brief pause to ensure processes are terminated
+            Start-Sleep -Milliseconds 1000
+        } else {
+            Write-Log "No other ArchiveRetention processes found." -Level INFO
+            
+            # Still remove lock file if it exists
+            if (Test-Path $script:LockFilePath) {
+                Write-Log "Removing orphaned lock file..." -Level WARNING
+                Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+                Write-Log "Lock file removed." -Level SUCCESS
+            }
+        }
+    } catch {
+        Write-Log "Error checking for processes: $_" -Level WARNING
+        # Continue anyway with Force - just remove the lock
+        if (Test-Path $script:LockFilePath) {
+            Write-Log "Removing lock file (force mode)..." -Level WARNING
+            Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+            Write-Log "Lock file removed." -Level SUCCESS
+        }
     }
-    Write-Log "Another instance appears to be running. Exiting to prevent conflicts." -Level FATAL
-    exit 9
+}
+
+# Handle ForceClearLock parameter
+if ($ForceClearLock) {
+    Write-Log "ForceClearLock specified. Checking for orphaned lock file..." -Level INFO
+    if (Test-Path $script:LockFilePath) {
+        # Check if any ArchiveRetention process is actually running
+        $runningProcesses = @()
+        try {
+            $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+            $runningProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" | 
+                Where-Object { $_.CommandLine -like "*$scriptName*" -and $_.ProcessId -ne $PID }
+        } catch {
+            # Fallback to Get-Process if CIM fails
+            try {
+                $runningProcesses = Get-Process -Name powershell, pwsh -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.Id -ne $PID }
+            } catch {
+                Write-Log "Could not check for running processes: $_" -Level WARNING
+            }
+        }
+        
+        if ($runningProcesses.Count -eq 0) {
+            Write-Log "No other ArchiveRetention processes found. Removing orphaned lock file..." -Level WARNING
+            Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+            Write-Log "Orphaned lock file removed." -Level SUCCESS
+            # Give the file system a moment to release the file
+            Start-Sleep -Milliseconds 500
+        } else {
+            Write-Log "Found $($runningProcesses.Count) PowerShell process(es) that might be running ArchiveRetention:" -Level WARNING
+            foreach ($proc in $runningProcesses) {
+                $cmdLine = if ($proc.CommandLine) { 
+                    $truncated = if ($proc.CommandLine.Length -gt 100) { 
+                        $proc.CommandLine.Substring(0, 100) + "..." 
+                    } else { 
+                        $proc.CommandLine 
+                    }
+                    $truncated
+                } else { 
+                    "(command line not available)" 
+                }
+                Write-Log "  PID $($proc.ProcessId): $cmdLine" -Level INFO
+            }
+            
+            # Check if lock file contains current PID
+            if (Test-Path $script:LockFilePath) {
+                try {
+                    $lockContent = Get-Content $script:LockFilePath -Raw
+                    if ($lockContent -match '(\d+)') {
+                        $lockPID = [int]$matches[1]
+                        Write-Log "Lock file contains PID: $lockPID" -Level INFO
+                        
+                        # Check if that specific process exists
+                        $lockProcess = Get-Process -Id $lockPID -ErrorAction SilentlyContinue
+                        if (-not $lockProcess) {
+                            Write-Log "Process $lockPID from lock file is not running. Lock file is stale." -Level WARNING
+                            Write-Log "Removing stale lock file..." -Level WARNING
+                            Remove-Item -Path $script:LockFilePath -Force -ErrorAction SilentlyContinue
+                            Write-Log "Stale lock file removed." -Level SUCCESS
+                            Start-Sleep -Milliseconds 500  # Give file system time to release
+                            return  # Don't exit, continue with script
+                        }
+                    }
+                } catch {
+                    Write-Log "Error reading lock file: $_" -Level WARNING
+                }
+            }
+            
+            Write-Log "Cannot force clear lock - other PowerShell processes are running." -Level ERROR
+            Write-Log "Use Task Manager to end orphaned PowerShell processes if needed." -Level INFO
+            exit 9
+        }
+    } else {
+        Write-Log "No lock file found. Proceeding normally." -Level INFO
+    }
+}
+
+# Check for and clean up stale locks first (skip if ForceClearLock or Force already handled it)
+if (-not $ForceClearLock -and -not $Force) {
+    try {
+        Test-StaleLock -LockFilePath $script:LockFilePath | Out-Null
+    } catch {
+        Write-Log "Error checking stale locks: $_" -Level WARNING
+    }
+}
+
+# Also check for running ArchiveRetention processes (skip if Force was used)
+if (-not $Force) {
+    try {
+        $runningProcesses = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { 
+            $_.CommandLine -like "*ArchiveRetention.ps1*" -and $_.ProcessId -ne $PID 
+        }
+    } catch {
+        # Fallback if CIM fails - just check with Get-Process
+        Write-Log "Could not check for running processes via CIM. Using basic process check." -Level DEBUG
+        $runningProcesses = @()
+        # Simple check for other PowerShell processes with our script name
+        $psProcesses = Get-Process -Name powershell* -ErrorAction SilentlyContinue
+        if ($psProcesses) {
+            foreach ($proc in $psProcesses) {
+                if ($proc.Id -ne $PID) {
+                    try {
+                        $cmd = $proc.CommandLine
+                        if ($cmd -like "*ArchiveRetention.ps1*") {
+                            $runningProcesses += $proc
+                        }
+                    } catch {
+                        # Can't access CommandLine, skip this process
+                    }
+                }
+            }
+        }
+    }
+    
+    if ($runningProcesses) {
+        Write-Log "Found existing ArchiveRetention.ps1 process(es) running:" -Level WARNING
+        foreach ($proc in $runningProcesses) {
+            Write-Log "  PID: $($proc.ProcessId), Command: $($proc.CommandLine -replace '^(.{100}).*', '$1...')" -Level WARNING
+        }
+        Write-Log "Another instance appears to be running. Exiting to prevent conflicts." -Level FATAL
+        exit 9
+    }
 }
 
 try {
@@ -477,9 +658,19 @@ try {
     Write-Log "Acquired single-instance lock ($script:LockFilePath)" -Level DEBUG
 }
 catch [System.IO.IOException] {
+    Write-Log "Lock file is in use. Checking for stale lock..." -Level DEBUG
     # Try once more after stale lock cleanup
-    Start-Sleep -Milliseconds 100
-    if (Test-StaleLock -LockFilePath $script:LockFilePath) {
+    Start-Sleep -Milliseconds 500
+    
+    $staleLockRemoved = $false
+    try {
+        $staleLockRemoved = Test-StaleLock -LockFilePath $script:LockFilePath
+    } catch {
+        Write-Log "Error during stale lock check: $_" -Level WARNING
+    }
+    
+    if ($staleLockRemoved) {
+        Start-Sleep -Milliseconds 500  # Extra delay after removal
         try {
             $script:LockFileStream = [System.IO.FileStream]::new(
                 $script:LockFilePath,
@@ -493,11 +684,13 @@ catch [System.IO.IOException] {
             Write-Log "Acquired single-instance lock after stale lock cleanup ($script:LockFilePath)" -Level DEBUG
         }
         catch {
-            Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
+            Write-Log "Failed to acquire lock even after cleanup: $($_.Exception.Message)" -Level ERROR
+            Write-Log "Another instance may be starting. Try again in a few seconds or use -ForceClearLock." -Level FATAL
             exit 9
         }
     } else {
-        Write-Log "Another instance of ArchiveRetention.ps1 is already running (lock file in use). Exiting." -Level FATAL
+        Write-Log "Lock file is actively in use by another process." -Level ERROR
+        Write-Log "Use -ForceClearLock if you're sure no other instance is running." -Level FATAL
         exit 9
     }
 }
@@ -521,7 +714,42 @@ if (-not [string]::IsNullOrEmpty($CredentialTarget)) {
 
     Write-Log "CredentialTarget '$CredentialTarget' specified. Attempting to map network drive." -Level INFO
     try {
-        $credentialInfo = Get-ShareCredential -Target $CredentialTarget
+        $credentialInfo = $null
+        try {
+            $credentialInfo = Get-ShareCredential -Target $CredentialTarget
+        }
+        catch {
+            # Check if it's a decryption error
+            if ($_.Exception.Message -like "*machine-bound*" -or $_.Exception.Message -like "*Padding is invalid*") {
+                Write-Log "Credential decryption failed - credential was saved under a different user or machine context" -Level ERROR
+                Write-Log "Current user: $([System.Environment]::UserDomainName)\$([System.Environment]::UserName)" -Level INFO
+                Write-Log "To fix this issue, either:" -Level INFO
+                Write-Log "  1. Re-save the credential: .\Save-Credential.ps1 -Target '$CredentialTarget' -SharePath '\\server\share' -UserName 'username'" -Level INFO
+                Write-Log "  2. Run the script as the user who originally saved the credential" -Level INFO
+                Write-Log "  3. Use WinRM: python3 tools/winrm_helper.py nas_execute <days>" -Level INFO
+                $errorMsg = "Cannot decrypt credential '$CredentialTarget' - it was saved under a different security context"
+            } else {
+                $errorMsg = "Failed to retrieve credential '$CredentialTarget': $($_.Exception.Message)"
+            }
+            Write-Log $errorMsg -Level FATAL
+            
+            # Close deletion log writer before exit
+            if ($script:DeletionLogWriter) {
+                try {
+                    if (-not $script:DeletionLogWriter.BaseStream.IsClosed) {
+                        $script:DeletionLogWriter.Flush()
+                        $script:DeletionLogWriter.Close()
+                        $script:DeletionLogWriter.Dispose()
+                        $script:DeletionLogWriter = $null
+                    }
+                } catch {
+                    Write-Log "Error closing deletion log writer: $($_.Exception.Message)" -Level WARNING
+                }
+            }
+            
+            Complete-ScriptExecution -Success $false -Message $errorMsg
+            exit 1
+        }
 
         if ($null -eq $credentialInfo) {
             $errorMsg = "Failed to retrieve saved credential for target '$CredentialTarget'. Please run Save-Credential.ps1 first."
@@ -1395,6 +1623,9 @@ function Invoke-ParallelFileProcessing {
                 try {
                     $result = $job.PowerShell.EndInvoke($job.Handle)
                     
+                    # Add result to the collection
+                    $results.Add($result) | Out-Null
+                    
                     if ($result.Success) {
                         $successCount++
                         $processedSize += $result.Size
@@ -1440,11 +1671,13 @@ function Invoke-ParallelFileProcessing {
     
     # Collect successfully deleted files
     $deletedFiles = @()
+    Write-Log "Collecting deleted files from $($results.Count) results (Execute=$Execute)" -Level DEBUG
     foreach ($result in $results) {
         if ($result.Success -and $Execute) {
             $deletedFiles += $result.FilePath
         }
     }
+    Write-Log "Collected $($deletedFiles.Count) deleted files to return" -Level DEBUG
     
     return @{
         SuccessCount = $successCount
@@ -1501,6 +1734,18 @@ try {
     # Define cutoff date
     $cutoffDate = (Get-Date).AddDays(-$RetentionDays)
 
+    # Auto-enable parallel processing for network paths unless explicitly disabled
+    if (-not $PSBoundParameters.ContainsKey('ParallelProcessing') -and -not $Sequential) {
+        Write-Log "Checking if path '$ArchivePath' is network path for auto-parallel" -Level DEBUG
+        if ($ArchivePath -match '^\\\\') {
+            $ParallelProcessing = $true
+            Write-Log "Auto-enabled parallel processing for network path: $ArchivePath" -Level INFO
+            if ($script:showProgress) {
+                Write-Host "  → Auto-enabled parallel processing (8 threads) for network path" -ForegroundColor Green
+            }
+        }
+    }
+
     # Log system and environment information
     $timezone = [System.TimeZoneInfo]::Local
     $localNow = Get-Date
@@ -1520,7 +1765,7 @@ try {
     Write-Log "  Include File Types: $($IncludeFileTypes -join ', ')" -Level INFO
     Write-Log "  Exclude File Types: $(if ($ExcludeFileTypes.Count -eq 0) { '(none)' } else { $ExcludeFileTypes -join ', ' })" -Level INFO
     Write-Log "  Batch Size: $BatchSize files" -Level INFO
-    Write-Log "  Parallel Processing: $(if ($ParallelProcessing) { "Enabled ($ThreadCount threads)" } else { 'Disabled (sequential)' })" -Level INFO
+    Write-Log "  Parallel Processing: $(if ($ParallelProcessing) { "Enabled ($ThreadCount threads)" } else { 'Disabled (sequential mode requested)' })" -Level INFO
     $progressFeatures = @()
     if ($ShowScanProgress) { $progressFeatures += 'scan' }
     if ($ShowDeleteProgress) { $progressFeatures += 'delete' }
@@ -1529,12 +1774,68 @@ try {
     Write-Log "  Smart Directory Cleanup: Enabled (tracks modified directories)" -Level INFO
     Write-Log "  Mode: $(if ($Execute) { 'EXECUTION' } else { 'DRY RUN - No files will be deleted' })" -Level INFO
     
-    # Performance tip for network operations
-    if (-not $ParallelProcessing -and $ArchivePath -like "\\*") {
-        Write-Log "PERFORMANCE TIP: For network paths, use -ParallelProcessing -ThreadCount 8 for 4-8x faster deletion" -Level INFO
+    # Performance tip if sequential mode was explicitly requested for network path
+    if ($Sequential -and $ArchivePath -like "\\*") {
+        Write-Log "PERFORMANCE WARNING: Sequential mode requested for network path. Consider removing -Sequential for 4-8x faster deletion" -Level WARNING
         if ($script:showProgress) {
-            Write-Host "`n  ⚡ PERFORMANCE TIP: Add -ParallelProcessing -ThreadCount 8 for much faster network deletion!" -ForegroundColor Yellow
-            Write-Host "     Example: .\ArchiveRetention.ps1 ... -ParallelProcessing -ThreadCount 8 -BatchSize 200" -ForegroundColor DarkYellow
+            Write-Host "`n  ⚠️  PERFORMANCE WARNING: Sequential mode will be slower on network paths!" -ForegroundColor Yellow
+            Write-Host "     Remove -Sequential to enable parallel processing (default for network paths)" -ForegroundColor DarkYellow
+        }
+    }
+
+    # Check if ArchivePath is a network path and needs credentials
+    # Note: PowerShell may have already stripped one backslash, so we check for both patterns
+    Write-Log "Checking if '$ArchivePath' is a network path (starts with \\ or single \ followed by IP)..." -Level DEBUG
+    $isNetworkPath = ($ArchivePath -like "\\*" -or $ArchivePath -match '^\\\d+\.\d+\.\d+\.\d+\\')
+    Write-Log "Is network path: $isNetworkPath, Has CredentialTarget: $($PSBoundParameters.ContainsKey('CredentialTarget'))" -Level DEBUG
+    
+    if ($isNetworkPath -and -not $PSBoundParameters.ContainsKey('CredentialTarget')) {
+        Write-Log "Network path detected. Checking for saved credentials..." -Level INFO
+        
+        # Import credential helper module to check for saved credentials
+        try {
+            $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'modules/ShareCredentialHelper.psm1'
+            Import-Module $modulePath -Force -ErrorAction Stop
+            
+            # Get all saved credentials and check if any match this path
+            $savedCreds = Get-SavedCredentials
+            # Need to normalize paths for comparison - add missing backslash if needed
+            $normalizedPath = if ($ArchivePath -match '^\\\d+\.\d+\.\d+\.\d+\\') {
+                "\\$ArchivePath"
+            } else {
+                $ArchivePath
+            }
+            $matchingCred = $savedCreds | Where-Object { $_.SharePath -eq $normalizedPath -or $_.SharePath -eq $ArchivePath } | Select-Object -First 1
+            
+            if ($matchingCred) {
+                Write-Log "Found saved credential for '$ArchivePath' (Target: $($matchingCred.Target))" -Level INFO
+                
+                # Try to mount the network drive with the saved credential
+                try {
+                    $credentialInfo = Get-ShareCredential -Target $matchingCred.Target
+                    
+                    if ($credentialInfo) {
+                        # Create a temporary PSDrive
+                        $tempDriveName = "ArchiveMount"
+                        New-PSDrive -Name $tempDriveName -PSProvider FileSystem -Root $credentialInfo.SharePath -Credential $credentialInfo.Credential -ErrorAction Stop | Out-Null
+                        Write-Log "Successfully mounted network drive using saved credential '$($matchingCred.Target)'" -Level SUCCESS
+                        
+                        # Update ArchivePath to use the mounted drive
+                        $ArchivePath = (Get-PSDrive $tempDriveName).Root
+                        
+                        # Mark that we mounted a drive for cleanup later
+                        $script:tempDriveName = $tempDriveName
+                    }
+                } catch {
+                    Write-Log "Failed to mount network drive with saved credential: $($_.Exception.Message)" -Level WARNING
+                    Write-Log "Attempting to access path directly..." -Level INFO
+                }
+            } else {
+                Write-Log "No saved credential found for network path '$ArchivePath'" -Level DEBUG
+                Write-Log "To save credentials for this path, run: .\Save-Credential.ps1 -Target 'YourTargetName' -SharePath '$ArchivePath'" -Level INFO
+            }
+        } catch {
+            Write-Log "Could not load credential helper module: $($_.Exception.Message)" -Level DEBUG
         }
     }
 
@@ -1546,6 +1847,15 @@ try {
         Write-Log "Current user: $([System.Environment]::UserDomainName)\$([System.Environment]::UserName)" -Level ERROR
         Write-Log "Working directory: $(Get-Location)" -Level ERROR
         Write-Log "If this is a network path, ensure it is accessible and that the script is running as a user with appropriate permissions." -Level ERROR
+        
+        # Provide helpful suggestion for network paths
+        if ($ArchivePath -like "\\*") {
+            Write-Log "TIP: For network paths, either:" -Level ERROR
+            Write-Log "  1. Use -CredentialTarget parameter with a saved credential" -Level ERROR
+            Write-Log "  2. Save credentials first: .\Save-Credential.ps1 -Target 'NAS_CREDS' -SharePath '$ArchivePath'" -Level ERROR
+            Write-Log "  3. Establish network connection first: net use '$ArchivePath' /user:username" -Level ERROR
+        }
+        
         exit 1
     }
 
@@ -1668,11 +1978,16 @@ try {
                                     $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
                                     
                                     # Write deleted files to retention log
-                                    if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-                                        foreach ($deletedFile in $batchResult.DeletedFiles) {
-                                            $script:DeletionLogWriter.WriteLine($deletedFile)
+                                    if ($script:DeletionLogWriter) {
+                                        if ($batchResult.DeletedFiles -and $batchResult.DeletedFiles.Count -gt 0) {
+                                            Write-Log "Writing $($batchResult.DeletedFiles.Count) deleted files to retention log" -Level DEBUG
+                                            foreach ($deletedFile in $batchResult.DeletedFiles) {
+                                                $script:DeletionLogWriter.WriteLine($deletedFile)
+                                            }
+                                            $script:DeletionLogWriter.Flush()
+                                        } else {
+                                            Write-Log "No deleted files returned from batch (DeletedFiles is null or empty)" -Level DEBUG
                                         }
-                                        $script:DeletionLogWriter.Flush()
                                     }
                                     
                                     # Aggregate results
@@ -1864,11 +2179,16 @@ try {
         $batchResult = Invoke-ParallelFileProcessing -Files $batchToProcess -Execute $true -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
         
         # Write deleted files to retention log
-        if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-            foreach ($deletedFile in $batchResult.DeletedFiles) {
-                $script:DeletionLogWriter.WriteLine($deletedFile)
+        if ($script:DeletionLogWriter) {
+            if ($batchResult.DeletedFiles -and $batchResult.DeletedFiles.Count -gt 0) {
+                Write-Log "Writing $($batchResult.DeletedFiles.Count) deleted files to retention log" -Level DEBUG
+                foreach ($deletedFile in $batchResult.DeletedFiles) {
+                    $script:DeletionLogWriter.WriteLine($deletedFile)
+                }
+                $script:DeletionLogWriter.Flush()
+            } else {
+                Write-Log "No deleted files returned from final batch (DeletedFiles is null or empty)" -Level DEBUG
             }
-            $script:DeletionLogWriter.Flush()
         }
         
         # Aggregate results
@@ -1876,6 +2196,10 @@ try {
         $errorCount += $batchResult.ErrorCount
         $processedSize += $batchResult.ProcessedSize
         $processedCount += $batchToProcess.Count
+        
+        # Update script-level tracking variables
+        $script:totalFilesDeleted = $successCount
+        $script:totalSpaceFreed = [math]::Round($processedSize / 1GB, 2)
         
         # Merge modified directories
         foreach ($dir in $batchResult.ModifiedDirectories.Keys) {
@@ -1969,11 +2293,16 @@ try {
             $batchResult = Invoke-ParallelFileProcessing -Files $currentBatch -Execute $Execute -ThreadCount $ThreadCount -MaxRetries $MaxRetries -RetryDelaySeconds $RetryDelaySeconds -DeletionLogPath $script:DeletionLogPath
             
             # Write deleted files to retention log
-            if ($script:DeletionLogWriter -and $batchResult.DeletedFiles.Count -gt 0) {
-                foreach ($deletedFile in $batchResult.DeletedFiles) {
-                    $script:DeletionLogWriter.WriteLine($deletedFile)
+            if ($script:DeletionLogWriter) {
+                if ($batchResult.DeletedFiles -and $batchResult.DeletedFiles.Count -gt 0) {
+                    Write-Log "Writing $($batchResult.DeletedFiles.Count) deleted files to retention log from batch $batchNum" -Level DEBUG
+                    foreach ($deletedFile in $batchResult.DeletedFiles) {
+                        $script:DeletionLogWriter.WriteLine($deletedFile)
+                    }
+                    $script:DeletionLogWriter.Flush()
+                } else {
+                    Write-Log "No deleted files returned from batch $batchNum (DeletedFiles is null or empty)" -Level DEBUG
                 }
-                $script:DeletionLogWriter.Flush()
             }
             
             # Aggregate results
@@ -2223,12 +2552,14 @@ try {
                                 Remove-Item -Path $dirPath -Force -ErrorAction Stop
                                 Write-Log "Removed empty directory: $dirPath" -Level DEBUG
                                 $removedCount++
+                                $script:totalDirsRemoved = $removedCount
                             } catch {
                                 Write-Log "Failed to remove empty directory: $dirPath - $($_.Exception.Message)" -Level WARNING
                             }
                         } else {
                             Write-Log "Would remove empty directory: $dirPath" -Level DEBUG
                             $removedCount++
+                            $script:totalDirsRemoved = $removedCount
                         }
                     }
                     
@@ -2347,7 +2678,9 @@ finally {
         $finalDirsRemoved = if ($null -ne $script:totalDirsRemoved) { $script:totalDirsRemoved } elseif ($null -ne $removedCount) { $removedCount } else { 0 }
         $finalSpaceFreed = if ($null -ne $script:totalSpaceFreed) { $script:totalSpaceFreed } elseif ($null -ne $processedSize) { [math]::Round($processedSize / 1GB, 2) } else { 0 }
         
-        Complete-ScriptExecution -Success $true -FilesDeleted $finalFilesDeleted -DirectoriesRemoved $finalDirsRemoved -SpaceFreedGB $finalSpaceFreed
+        # Determine success status - false if terminated or if we had an error
+        $wasSuccessful = -not $script:terminated -and -not $Error[0]
+        Complete-ScriptExecution -Success $wasSuccessful -FilesDeleted $finalFilesDeleted -DirectoriesRemoved $finalDirsRemoved -SpaceFreedGB $finalSpaceFreed
     }
 }
 
