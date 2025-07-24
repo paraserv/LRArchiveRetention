@@ -58,6 +58,10 @@ test_data/
 generation_*.txt
 generation_*.log
 
+# Test scripts in root (should be in tests/ directory)
+/test_*.ps1
+/test_*.py
+
 # PowerShell transcripts and help files
 PowerShell_transcript.*.txt
 *.help.txt
