@@ -12,7 +12,7 @@ Comprehensive performance metrics and optimization strategies for the LogRhythm 
 
 ## Production Performance Results
 
-### Large-Scale NAS Operation (v2.2.0)
+### Large-Scale NAS Operation (v2.3.21)
 
 **Dataset**: 95,558 files (4.67 TB) via network share
 **Retention**: 15 months (456 days)
@@ -48,7 +48,7 @@ Comprehensive performance metrics and optimization strategies for the LogRhythm 
 | v1.1.0 | 150 MB | 1.5 GB | 15+ GB | Optimized arrays |
 | v2.0.0 | 100 MB | 1 GB | 10+ GB | Partial streaming |
 | v2.1.0 | 50 MB | 500 MB | 5+ GB | System.IO scan |
-| **v2.2.0** | **10 MB** | **10 MB** | **10 MB** | **Full streaming** |
+| **v2.3.21** | **10 MB** | **10 MB** | **10 MB** | **Full streaming** |
 
 ### Scan Performance Improvements
 
@@ -56,7 +56,7 @@ Comprehensive performance metrics and optimization strategies for the LogRhythm 
 |---------|-------------|--------------|-------------|
 | v1.0.0 | Get-ChildItem | 80-100 | Baseline |
 | v2.1.0 | System.IO | 1,200-1,600 | 10-20x |
-| v2.2.0 | System.IO + Streaming | 1,500-2,000 | 15-25x |
+| v2.3.21 | System.IO + Streaming | 1,500-2,000 | 15-25x |
 
 ### Deletion Performance
 
@@ -64,11 +64,11 @@ Comprehensive performance metrics and optimization strategies for the LogRhythm 
 |---------|------|------------|---------------|--------------|
 | v1.0.0 | Batch | After full scan | Linear | 25-30 |
 | v2.0.0 | Batch | After full scan | Linear | 30-35 |
-| v2.2.0 | Streaming | < 1 second | None | 35-40 |
+| v2.3.21 | Streaming | < 1 second | None | 35-40 |
 
 ## Optimization Strategies
 
-### 1. Streaming Mode (v2.2.0+)
+### 1. Streaming Mode (v2.3.21+)
 
 **Benefits**:
 - Constant memory usage regardless of file count
@@ -241,7 +241,7 @@ Select-String -Path .\script_logs\ArchiveRetention.log -Pattern "Performance|Tim
 - Enable parallel processing
 
 **Memory-Constrained**:
-- Use v2.2.0+ (streaming mode)
+- Use v2.3.21+ (streaming mode)
 - Enable QuietMode
 - Avoid pre-scanning
 
@@ -308,7 +308,7 @@ foreach ($config in $configurations) {
 
 ## Key Takeaways
 
-1. **v2.2.0 streaming mode** eliminates memory constraints
+1. **v2.3.21 streaming mode** eliminates memory constraints
 2. **Parallel processing** provides 4-8x performance on network shares
 3. **System.IO optimization** provides 10-20x faster file enumeration
 4. **Network I/O** is typically the bottleneck for large operations

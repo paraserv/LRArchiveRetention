@@ -1,6 +1,6 @@
 # LogRhythm Archive Retention Manager
 
-![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.3.21-blue.svg)
 ![PowerShell](https://img.shields.io/badge/powershell-5.1%2B-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
@@ -64,10 +64,10 @@ For detailed setup instructions, see [Installation Guide](docs/installation.md).
 
 | Metric | Value | Version |
 |--------|-------|---------|
-| **Files Processed** | 95,558 (4.67 TB) | v2.2.0 |
+| **Files Processed** | 95,558 (4.67 TB) | v2.3.21 |
 | **Scan Rate** | 1,600 files/sec | v2.1.0+ |
 | **Delete Rate** | 35 files/sec (network) | All |
-| **Memory Usage** | 10 MB constant | v2.2.0+ |
+| **Memory Usage** | 10 MB constant | v2.3.21+ |
 | **Parallel Speedup** | 4-8x | v1.2.0+ |
 
 See [Performance Benchmarks](docs/performance-benchmarks.md) for detailed metrics.
@@ -167,4 +167,4 @@ MIT License - See [LICENSE](LICENSE) file
 
 ---
 
-**Current Version**: 2.2.0 | **Updated**: July 2025
+**Current Version**: 2.3.21 | **Updated**: July 2025

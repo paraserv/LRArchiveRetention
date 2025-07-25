@@ -20,7 +20,7 @@ This guide provides step-by-step instructions for setting up the LogRhythm Archi
 
 ### Required Components
 - **Windows Server** with Task Scheduler service running
-- **ArchiveRetention.ps1 v2.2.0+** installed in secure location (e.g., `C:\LogRhythm\Scripts\ArchiveRetention\`)
+- **ArchiveRetention.ps1 v2.3.21+** installed in secure location (e.g., `C:\LogRhythm\Scripts\ArchiveRetention\`)
 - **PowerShell 5.1+** installed and execution policy configured
 - **Service Account** with appropriate permissions (recommended) or use of SYSTEM account
 - **Network Share Credentials** (if using UNC paths) pre-configured with `Save-Credential.ps1`
@@ -39,7 +39,7 @@ This guide provides step-by-step instructions for setting up the LogRhythm Archi
 - **Frequency**: Weekly (recommended) or bi-weekly
 - **Day**: Sunday (low activity day)
 - **Time**: 2:00 AM (outside business hours)
-- **Duration**: Allow 2-4 hours for completion on large datasets (v2.2.0 streaming mode is faster)
+- **Duration**: Allow 2-4 hours for completion on large datasets (v2.3.21 streaming mode is faster)
 
 ### Considerations
 - **Business Hours**: Always run during maintenance windows
@@ -192,7 +192,7 @@ try {
 | **Run only if network available** | Yes | Required for UNC paths |
 | **Stop if idle ends** | No | Allow long-running operations |
 | **Allow start on batteries** | Yes | Laptops/UPS scenarios |
-| **Timeout** | 4-6 hours | v2.2.0 streaming mode is faster |
+| **Timeout** | 4-6 hours | v2.3.21 streaming mode is faster |
 | **Restart on failure** | No | Review logs instead |
 
 ### Command Line Arguments
@@ -212,7 +212,7 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scri
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scripts\ArchiveRetention\ArchiveRetention.ps1' -CredentialTarget 'TARGET_NAME' -RetentionDays DAYS -Execute -LogPath 'C:\Logs\ArchiveRetention\retention.log'"
 ```
 
-**For Scheduled Tasks (v2.2.0+ Recommended):**
+**For Scheduled Tasks (v2.3.21+ Recommended):**
 ```cmd
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -Command "& 'C:\LogRhythm\Scripts\ArchiveRetention\ArchiveRetention.ps1' -CredentialTarget 'TARGET_NAME' -RetentionDays DAYS -Execute -QuietMode"
 ```
@@ -339,12 +339,12 @@ if ($Task) {
 ### Key Metrics to Monitor
 
 - **Task Execution Status**: Success/Failure
-- **Execution Duration**: Track performance trends (v2.2.0 should show improvement)
+- **Execution Duration**: Track performance trends (v2.3.21 should show improvement)
 - **Files Processed**: Count and size of deleted files (streaming mode processes immediately)
 - **Error Rates**: Failed file deletions
 - **Disk Space Freed**: Storage reclaimed in real-time
 - **Network Connectivity**: UNC path accessibility
-- **Memory Usage**: Should remain constant with v2.2.0 O(1) streaming mode
+- **Memory Usage**: Should remain constant with v2.3.21 O(1) streaming mode
 
 ### Maintenance Tasks
 
@@ -440,7 +440,7 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 $Principal = New-ScheduledTaskPrincipal -UserId $Config.ServiceAccount -LogonType Password
 
-Register-ScheduledTask -TaskName $Config.TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Production LogRhythm Archive Retention v2.2.0 - 3 year retention policy with streaming deletion"
+Register-ScheduledTask -TaskName $Config.TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "Production LogRhythm Archive Retention v2.3.21 - 3 year retention policy with streaming deletion"
 ```
 
 ---

@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Human-readable timestamp verification
   - End-to-end retention testing workflow
 
-## [2.3.20] - 2025-07-22
+## [2.3.21] - 2025-07-24
 
 ### Fixed
 - **Critical syntax error**: Fixed missing closing brace in catch block

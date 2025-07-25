@@ -6,7 +6,7 @@ Development guidance for Claude Code when working with the LogRhythm Archive Ret
 
 PowerShell-based archive retention system for LogRhythm .lca files with secure credential management.
 
-**Version**: 2.2.0 | **Docs**: [README.md](README.md) | [CHANGELOG.md](CHANGELOG.md) | [Technical Docs](docs/)
+**Version**: 2.3.21 | **Docs**: [README.md](README.md) | [CHANGELOG.md](CHANGELOG.md) | [Technical Docs](docs/)
 
 ## Quick Commands
 
@@ -62,7 +62,7 @@ security add-internet-password -s "10.20.1.7" -a "sanghanas" -w
 ## Architecture Notes
 
 ### Core Scripts
-- `ArchiveRetention.ps1` - Main retention engine (streaming mode in v2.2.0+)
+- `ArchiveRetention.ps1` - Main retention engine (streaming mode in v2.3.21+)
 - `Save-Credential.ps1` - Credential management
 - `modules/ShareCredentialHelper.psm1` - Credential helper module
 
