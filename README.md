@@ -9,6 +9,13 @@ Enterprise-grade PowerShell solution for automated cleanup of LogRhythm Inactive
 
 ## 🚀 Quick Start
 
+### 1. Setup Network Credentials (One-time)
+```powershell
+# Save credentials for network share access
+.\Save-Credential.ps1 -CredentialTarget "NAS_PROD" -SharePath "\\server\share"
+```
+
+### 2. Run Archive Retention
 ```powershell
 # Dry-run (safe preview mode)
 .\ArchiveRetention.ps1 -ArchivePath "D:\LogRhythmArchives\Inactive" -RetentionDays 456
@@ -18,6 +25,12 @@ Enterprise-grade PowerShell solution for automated cleanup of LogRhythm Inactive
 
 # Network share with saved credentials
 .\ArchiveRetention.ps1 -CredentialTarget "NAS_PROD" -RetentionDays 1095 -Execute
+```
+
+### 3. Generate Test Data (Optional)
+```bash
+# Generate 4TB of properly aged test data on NAS
+ssh qnap 'cd /share/LRArchives && ./generate_nas_balanced.sh 4096'
 ```
 
 ## ✨ Key Features
@@ -96,6 +109,7 @@ For complete command reference, see [Command Reference](docs/command-reference.m
 | [Command Reference](docs/command-reference.md) | All commands and parameters |
 | [Performance](docs/performance-benchmarks.md) | Benchmarks and optimization |
 | [Credentials](docs/credentials.md) | Secure credential management |
+| [Test Data Generation](tests/README.md) | Generate properly aged test data |
 | [Scheduled Tasks](docs/scheduled-task-setup.md) | Automation configuration |
 | [CLAUDE.md](CLAUDE.md) | AI assistant context |
 

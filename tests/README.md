@@ -60,7 +60,63 @@ python3 tools/validate_script.py
 
 ## Test Data Generation
 
-See [TEST_DATA_GENERATION_GUIDE.md](TEST_DATA_GENERATION_GUIDE.md) for detailed instructions on generating test data.
+### 🔧 Recent Fix: Timestamp Regression (July 2025)
+
+**Issue Resolved**: The `generate_nas_balanced.sh` script was creating files with current timestamps instead of backdated timestamps, making them ineligible for retention testing.
+
+**Fix Applied**: Added proper file timestamp setting using `touch -t` command to match folder dates.
+
+### 📊 Available Generation Scripts
+
+| Script | Platform | Use Case | Timestamp Support |
+|--------|----------|----------|-------------------|
+| `GenerateTestData.ps1` | PowerShell 7+ | Local/Network, High Performance | ✅ Proper backdating |
+| `generate_nas_balanced.sh` | Bash/Linux | Direct NAS generation | ✅ **Fixed July 2025** |
+| `generation_scripts/*.py` | Python | Various test scenarios | ✅ Configurable |
+
+### 🚀 Quick Start - Generate Test Data
+
+#### Option 1: Direct NAS Generation (Recommended)
+```bash
+# Generate 4TB of properly aged test data
+ssh qnap 'cd /share/LRArchives && ./generate_nas_balanced.sh 4096'
+
+# Verify timestamps are properly backdated
+ssh qnap 'find /share/LRArchives -name "*.lca" -exec stat -c "%y %n" {} \; | head -5'
+```
+
+#### Option 2: PowerShell Generation
+```powershell
+# Generate test data with network credentials
+.\tests\GenerateTestData.ps1 -CredentialTarget "NAS_PROD" -FolderCount 5000 -MaxSizeGB 100
+
+# Local generation
+.\tests\GenerateTestData.ps1 -RootPath "D:\TestData" -FolderCount 1000 -MaxFileSizeMB 10
+```
+
+### 🔍 Timestamp Verification
+
+After generating test data, verify timestamps are properly backdated:
+
+```bash
+# Check file modification times (should span 3+ years)
+ssh qnap 'find /share/LRArchives -name "*.lca" -exec stat -c "%Y %n" {} \; | sort -n | head -10'
+
+# Human-readable format
+ssh qnap 'find /share/LRArchives -name "*.lca" -exec stat -c "%y %n" {} \; | head -10'
+```
+
+### 🎯 Test Retention Policy
+
+After generating properly aged data:
+
+```powershell
+# Test 3-year retention (should find files older than 1095 days)
+.\ArchiveRetention.ps1 -CredentialTarget "NAS_PROD" -RetentionDays 1095
+
+# Execute if results look correct
+.\ArchiveRetention.ps1 -CredentialTarget "NAS_PROD" -RetentionDays 1095 -Execute
+```
 
 ## Adding New Tests
 

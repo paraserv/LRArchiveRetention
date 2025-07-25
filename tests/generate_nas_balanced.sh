@@ -75,7 +75,7 @@ get_timestamp() {
     FOLDER_EPOCH=$((CURRENT_EPOCH - (DAYS_AGO * 86400)))
     DATESTR=$(date -d "@$FOLDER_EPOCH" +%Y%m%d 2>/dev/null || date -r "$FOLDER_EPOCH" +%Y%m%d 2>/dev/null || echo "20250101")
     TICKS="${FOLDER_EPOCH}0000000"
-    echo "${DATESTR}_1_1_1_${TICKS}"
+    echo "${DATESTR}_1_1_1_${TICKS}:${FOLDER_EPOCH}"
 }
 
 # Calculate average speed
@@ -150,8 +150,13 @@ while true; do
         break
     fi
     
-    FOLDER_NAME=$(get_timestamp)
+    TIMESTAMP_INFO=$(get_timestamp)
+    FOLDER_NAME="${TIMESTAMP_INFO%:*}"
+    FOLDER_EPOCH="${TIMESTAMP_INFO#*:}"
     mkdir -p "$FOLDER_NAME" 2>/dev/null
+    
+    # Calculate touch timestamp format (YYYYMMDDHHMM.SS)
+    TOUCH_TIME=$(date -d "@$FOLDER_EPOCH" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$FOLDER_EPOCH" +%Y%m%d%H%M.%S 2>/dev/null || echo "202201010000.00")
     
     FILE_COUNT=$((50 + RANDOM % 51))
     FOLDER_BYTES=0
@@ -164,6 +169,9 @@ while true; do
         FILENAME="${FOLDER_NAME:0:8}_${TIMESTR}_${RANDNUM}.lca"
         
         dd if="$RANDOM_FILE" of="$FOLDER_NAME/$FILENAME" bs=1M count="$FILE_SIZE_MB" 2>/dev/null
+        
+        # Set file modification time to match the backdated folder date
+        touch -t "$TOUCH_TIME" "$FOLDER_NAME/$FILENAME" 2>/dev/null
         
         FOLDER_BYTES=$((FOLDER_BYTES + FILE_SIZE_MB * 1024 * 1024))
         TOTAL_FILES=$((TOTAL_FILES + 1))

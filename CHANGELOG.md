@@ -5,6 +5,29 @@ All notable changes to the LogRhythm Archive Retention Manager will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.21] - 2025-07-24
+
+### Fixed
+- **Critical test data generation regression**: Fixed timestamp issue in `generate_nas_balanced.sh`
+  - Script was creating folders with backdated names but files with current timestamps
+  - Files were ineligible for retention testing (all showed July 2025 dates)
+  - Added proper file timestamp setting using `touch -t` command
+  - Files now have modification times matching their backdated folder dates
+  - Verified fix: test files now show proper 3+ year old timestamps
+
+### Improved
+- **Documentation**: Enhanced test data generation documentation
+  - Added comprehensive test data generation guide in `tests/README.md`
+  - Updated main README with credential setup and test data generation workflow
+  - Added timestamp verification commands and troubleshooting steps
+  - Documented the timestamp regression fix and validation process
+
+### Added
+- **Test data validation**: New commands for verifying properly aged test data
+  - SSH commands to check file timestamps on NAS
+  - Human-readable timestamp verification
+  - End-to-end retention testing workflow
+
 ## [2.3.20] - 2025-07-22
 
 ### Fixed
